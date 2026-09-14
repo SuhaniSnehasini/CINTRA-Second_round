@@ -9,7 +9,10 @@ from .database import Base
 class Suspect(Base):
     __tablename__ = "suspects"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
 
     suspect_code: Mapped[str] = mapped_column(
         String(20),
@@ -116,13 +119,37 @@ class Evidence(Base):
         nullable=False,
     )
 
+    # Original collector / registering officer
     original_badge_id: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
     )
 
+    # Current person responsible for the evidence
     current_custodian: Mapped[str | None] = mapped_column(
         String(64),
+        nullable=True,
+    )
+
+    # Collector metadata
+    collector_name: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+    )
+
+    collector_agency: Mapped[str | None] = mapped_column(
+        String(160),
+        nullable=True,
+    )
+
+    collection_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    # Human-readable evidence description
+    description: Mapped[str | None] = mapped_column(
+        Text,
         nullable=True,
     )
 
@@ -150,8 +177,8 @@ class CustodyEvent(Base):
     """
     Append-only-style audit events for an evidence item.
 
-    These records form the foundation for the later
-    Hyperledger Fabric blockchain integration.
+    These records form the foundation for the Hyperledger Fabric
+    blockchain integration.
     """
 
     __tablename__ = "custody_events"

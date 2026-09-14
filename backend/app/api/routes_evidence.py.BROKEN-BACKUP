@@ -1,0 +1,1631 @@
+import hashlib
+import os
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+
+from ..database import SessionLocal
+from ..models import CustodyEvent, Evidence
+from ..services.fabric_service import (
+    FabricServiceError,
+    get_fabric_history,
+    record_custody_event,
+)
+
+
+router = APIRouter(prefix="/evidence", tags=["Evidence"])
+
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def generate_evidence_id() -> str:
+    return f"EVD-{uuid.uuid4().hex[:12].upper()}"
+
+
+def generate_event_id() -> str:
+    return f"EVT-{uuid.uuid4().hex[:12].upper()}"
+
+
+def get_blockchain_status(event: CustodyEvent) -> str:
+    return event.blockchain_status or "NOT_RECORDED"
+
+
+def update_event_from_fabric(
+    event: CustodyEvent,
+    fabric_result: dict,
+) -> None:
+    transaction_id = (
+        fabric_result.get("transaction_id")
+        or fabric_result.get("tx_id")
+        or fabric_result.get("txId")
+    )
+
+    if not transaction_id:
+        chaincode_response = fabric_result.get("chaincode_response") or {}
+        transaction_id = (
+            chaincode_response.get("blockchainTxId")
+            or chaincode_response.get("blockchain_tx_id")
+            or chaincode_response.get("transaction_id")
+            or chaincode_response.get("tx_id")
+        )
+
+    event.blockchain_tx_id = transaction_id
+    event.blockchain_status = (
+        fabric_result.get("blockchain_status")
+        or "RECORDED"
+    )
+
+
+def record_event_on_fabric(event: CustodyEvent) -> dict:
+    return record_custody_event(
+        evidence_id=event.evidence_id,
+        event_id=event.event_id,
+        action=event.action,
+        actor_badge_id=event.actor_badge_id,
+        from_custodian=event.from_custodian,
+        to_custodian=event.to_custodian,
+        reason=event.reason,
+        file_sha256=event.file_sha256,
+        timestamp=event.timestamp.isoformat() + "Z",
+    )
+
+
+def synchronize_event_from_fabric(
+    db: Session,
+    event: CustodyEvent,
+) -> None:
+    try:
+        history = get_fabric_history(event.evidence_id)
+
+        if not history:
+            return
+
+        matching_event = None
+
+        for fabric_event in history:
+            fabric_event_id = (
+                fabric_event.get("event_id")
+                or fabric_event.get("eventId")
+                or fabric_event.get("id")
+            )
+
+            if fabric_event_id == event.event_id:
+                matching_event = fabric_event
+                break
+
+        if matching_event:
+            update_event_from_fabric(event, matching_event)
+            db.commit()
+
+    except FabricServiceError:
+        db.rollback()
+
+    except Exception:
+        db.rollback()
+
+
+def evidence_to_dict(evidence: Evidence) -> dict:
+    return {
+        "evidence_id": evidence.evidence_id,
+        "case_id": evidence.case_id,
+        "filename": evidence.filename,
+        "original_filename": evidence.original_filename,
+        "evidence_type": evidence.evidence_type,
+        "mime_type": evidence.mime_type,
+        "file_path": evidence.file_path,
+        "sha256": evidence.sha256,
+        "size_bytes": evidence.size_bytes,
+        "original_badge_id": evidence.original_badge_id,
+        "current_custodian": evidence.current_custodian,
+        "status": evidence.status,
+        "registered_at": evidence.registered_at,
+        "updated_at": evidence.updated_at,
+        "collector_name": evidence.collector_name,
+        "collector_agency": evidence.collector_agency,
+        "collection_timestamp": evidence.collection_timestamp,
+        "description": evidence.description,
+    }
+
+
+def event_to_dict(event: CustodyEvent) -> dict:
+    return {
+        "event_id": event.event_id,
+        "evidence_id": event.evidence_id,
+        "action": event.action,
+        "actor_badge_id": event.actor_badge_id,
+        "from_custodian": event.from_custodian,
+        "to_custodian": event.to_custodian,
+        "reason": event.reason,
+        "file_sha256": event.file_sha256,
+        "timestamp": event.timestamp,
+        "blockchain_tx_id": event.blockchain_tx_id,
+        "blockchain_status": get_blockchain_status(event),
+    }
+
+
+def parse_collection_timestamp(
+    collection_timestamp: str | None,
+) -> datetime | None:
+    if not collection_timestamp:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(
+            collection_timestamp.replace("Z", "+00:00")
+        )
+
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+
+        return parsed
+
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid collection_timestamp. "
+                "Use ISO format such as 2026-09-15T10:30:00Z."
+            ),
+        )
+
+
+@router.post("/upload")
+async def upload_evidence(
+    file: UploadFile = File(...),
+    type: str = Form("Evidence"),
+    badge_id: str | None = Form(None),
+    case_id: str | None = Form(None),
+    collector_name: str | None = Form(None),
+    collector_agency: str | None = Form(None),
+    collection_timestamp: str | None = Form(None),
+    description: str | None = Form(None),
+):
+    db = SessionLocal()
+    file_path = None
+
+    try:
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="A filename is required.",
+            )
+
+        content = await file.read()
+
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        file_sha256 = hashlib.sha256(content).hexdigest()
+
+        evidence_id = generate_evidence_id()
+
+        original_filename = file.filename
+
+        extension = os.path.splitext(original_filename)[1]
+
+        safe_filename = f"{evidence_id}{extension}"
+
+        file_path = os.path.join(
+            UPLOAD_DIR,
+            safe_filename,
+        )
+
+        with open(file_path, "wb") as output_file:
+            output_file.write(content)
+
+        parsed_collection_timestamp = parse_collection_timestamp(
+            collection_timestamp
+        )
+
+        now = datetime.utcnow()
+
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            case_id=case_id,
+            filename=safe_filename,
+            original_filename=original_filename,
+            evidence_type=type,
+            mime_type=file.content_type or "application/octet-stream",
+            file_path=file_path,
+            sha256=file_sha256,
+            size_bytes=len(content),
+            original_badge_id=badge_id,
+            current_custodian=badge_id,
+            status="ACTIVE",
+            registered_at=now,
+            updated_at=now,
+            collector_name=collector_name,
+            collector_agency=collector_agency,
+            collection_timestamp=parsed_collection_timestamp,
+            description=description,
+        )
+
+        db.add(evidence)
+        db.flush()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence.evidence_id,
+            action="REGISTERED",
+            actor_badge_id=badge_id,
+            from_custodian=None,
+            to_custodian=badge_id,
+            reason="Evidence registered",
+            file_sha256=file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        db.commit()
+
+        db.refresh(evidence)
+        db.refresh(event)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence": evidence_to_dict(evidence),
+                "custody_event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence": evidence_to_dict(evidence),
+            "custody_event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    except HTTPException:
+        db.rollback()
+
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Evidence upload failed: {str(error)}",
+        )
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}")
+def get_evidence(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        return {
+            "success": True,
+            "evidence": evidence_to_dict(evidence),
+        }
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}/custody")
+def get_evidence_custody(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        for event in events:
+            if event.blockchain_status in {
+                "PENDING",
+                "NOT_RECORDED",
+            }:
+                synchronize_event_from_fabric(
+                    db,
+                    event,
+                )
+
+        db.expire_all()
+
+        events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence.evidence_id,
+            "case_id": evidence.case_id,
+            "status": evidence.status,
+            "current_custodian": evidence.current_custodian,
+            "sha256": evidence.sha256,
+            "filename": evidence.filename,
+            "original_filename": evidence.original_filename,
+            "evidence_type": evidence.evidence_type,
+            "mime_type": evidence.mime_type,
+            "size_bytes": evidence.size_bytes,
+            "original_badge_id": evidence.original_badge_id,
+            "collector_name": evidence.collector_name,
+            "collector_agency": evidence.collector_agency,
+            "collection_timestamp": evidence.collection_timestamp,
+            "description": evidence.description,
+            "registered_at": evidence.registered_at,
+            "updated_at": evidence.updated_at,
+            "events": [
+                event_to_dict(event)
+                for event in events
+            ],
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/transfer")
+def transfer_evidence(
+    evidence_id: str,
+    to_badge_id: str = Form(...),
+    actor_badge_id: str | None = Form(None),
+    reason: str | None = Form(None),
+):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        if not to_badge_id:
+            raise HTTPException(
+                status_code=400,
+                detail="to_badge_id is required.",
+            )
+
+        from_custodian = evidence.current_custodian
+
+        if from_custodian == to_badge_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Evidence is already assigned to this custodian."
+                ),
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="TRANSFER",
+            actor_badge_id=actor_badge_id,
+            from_custodian=from_custodian,
+            to_custodian=to_badge_id,
+            reason=reason or "Evidence transferred",
+            file_sha256=registered_event.file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        evidence.current_custodian = to_badge_id
+        evidence.updated_at = now
+
+        db.commit()
+
+        db.refresh(event)
+        db.refresh(evidence)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence_id": evidence_id,
+                "current_custodian": evidence.current_custodian,
+                "event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "current_custodian": evidence.current_custodian,
+            "event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/access")
+def access_evidence(
+    evidence_id: str,
+    actor_badge_id: str | None = Form(None),
+    reason: str | None = Form(None),
+):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="ACCESS",
+            actor_badge_id=actor_badge_id,
+            from_custodian=evidence.current_custodian,
+            to_custodian=evidence.current_custodian,
+            reason=reason or "Evidence accessed",
+            file_sha256=registered_event.file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        evidence.updated_at = now
+
+        db.commit()
+
+        db.refresh(event)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence_id": evidence_id,
+                "event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/verify")
+def verify_evidence_integrity(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        if not evidence.file_path or not os.path.exists(
+            evidence.file_path
+        ):
+            return {
+                "success": False,
+                "evidence_id": evidence_id,
+                "integrity_status": "FILE_NOT_FOUND",
+                "integrity_verified": False,
+                "registered_sha256": registered_event.file_sha256,
+                "current_sha256": None,
+            }
+
+        with open(evidence.file_path, "rb") as input_file:
+            current_content = input_file.read()
+
+        current_sha256 = hashlib.sha256(
+            current_content
+        ).hexdigest()
+
+        is_match = (
+            current_sha256 == registered_event.file_sha256
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "integrity_status": (
+                "VERIFIED"
+                if is_match
+                else "TAMPERED"
+            ),
+            "integrity_verified": is_match,
+            "registered_sha256": registered_event.file_sha256,
+            "current_sha256": current_sha256,
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/reconcile")
+def reconcile_evidence(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        try:
+            fabric_history = get_fabric_history(
+                evidence_id
+            )
+
+        except FabricServiceError as fabric_error:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Unable to read Fabric custody history: "
+                    f"{fabric_error}"
+                ),
+            )
+
+        if not fabric_history:
+            fabric_history = []
+
+        local_events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        synchronized_count = 0
+
+        for event in local_events:
+            for fabric_event in fabric_history:
+                fabric_event_id = (
+                    fabric_event.get("event_id")
+                    or fabric_event.get("eventId")
+                    or fabric_event.get("id")
+                )
+
+                if fabric_event_id == event.event_id:
+                    update_event_from_fabric(
+                        event,
+                        fabric_event,
+                    )
+
+                    synchronized_count += 1
+                    break
+
+        db.commit()
+
+        db.refresh(evidence)
+
+        refreshed_events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "local_event_count": len(local_events),
+            "fabric_event_count": len(fabric_history),
+            "synchronized_count": synchronized_count,
+            "evidence": evidence_to_dict(evidence),
+            "events": [
+                event_to_dict(event)
+                for event in refreshed_events
+            ],
+        }
+
+    finally:
+        db.close()
+PYcat > app/api/routes_evidence.py <<'PY'
+import hashlib
+import os
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+
+from ..database import SessionLocal
+from ..models import CustodyEvent, Evidence
+from ..services.fabric_service import (
+    FabricServiceError,
+    get_fabric_history,
+    record_custody_event,
+)
+
+
+router = APIRouter(prefix="/evidence", tags=["Evidence"])
+
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def generate_evidence_id() -> str:
+    return f"EVD-{uuid.uuid4().hex[:12].upper()}"
+
+
+def generate_event_id() -> str:
+    return f"EVT-{uuid.uuid4().hex[:12].upper()}"
+
+
+def get_blockchain_status(event: CustodyEvent) -> str:
+    return event.blockchain_status or "NOT_RECORDED"
+
+
+def update_event_from_fabric(
+    event: CustodyEvent,
+    fabric_result: dict,
+) -> None:
+    transaction_id = (
+        fabric_result.get("transaction_id")
+        or fabric_result.get("tx_id")
+        or fabric_result.get("txId")
+    )
+
+    if not transaction_id:
+        chaincode_response = fabric_result.get("chaincode_response") or {}
+        transaction_id = (
+            chaincode_response.get("blockchainTxId")
+            or chaincode_response.get("blockchain_tx_id")
+            or chaincode_response.get("transaction_id")
+            or chaincode_response.get("tx_id")
+        )
+
+    event.blockchain_tx_id = transaction_id
+    event.blockchain_status = (
+        fabric_result.get("blockchain_status")
+        or "RECORDED"
+    )
+
+
+def record_event_on_fabric(event: CustodyEvent) -> dict:
+    return record_custody_event(
+        evidence_id=event.evidence_id,
+        event_id=event.event_id,
+        action=event.action,
+        actor_badge_id=event.actor_badge_id,
+        from_custodian=event.from_custodian,
+        to_custodian=event.to_custodian,
+        reason=event.reason,
+        file_sha256=event.file_sha256,
+        timestamp=event.timestamp.isoformat() + "Z",
+    )
+
+
+def synchronize_event_from_fabric(
+    db: Session,
+    event: CustodyEvent,
+) -> None:
+    try:
+        history = get_fabric_history(event.evidence_id)
+
+        if not history:
+            return
+
+        matching_event = None
+
+        for fabric_event in history:
+            fabric_event_id = (
+                fabric_event.get("event_id")
+                or fabric_event.get("eventId")
+                or fabric_event.get("id")
+            )
+
+            if fabric_event_id == event.event_id:
+                matching_event = fabric_event
+                break
+
+        if matching_event:
+            update_event_from_fabric(event, matching_event)
+            db.commit()
+
+    except FabricServiceError:
+        db.rollback()
+
+    except Exception:
+        db.rollback()
+
+
+def evidence_to_dict(evidence: Evidence) -> dict:
+    return {
+        "evidence_id": evidence.evidence_id,
+        "case_id": evidence.case_id,
+        "filename": evidence.filename,
+        "original_filename": evidence.original_filename,
+        "evidence_type": evidence.evidence_type,
+        "mime_type": evidence.mime_type,
+        "file_path": evidence.file_path,
+        "sha256": evidence.sha256,
+        "size_bytes": evidence.size_bytes,
+        "original_badge_id": evidence.original_badge_id,
+        "current_custodian": evidence.current_custodian,
+        "status": evidence.status,
+        "registered_at": evidence.registered_at,
+        "updated_at": evidence.updated_at,
+        "collector_name": evidence.collector_name,
+        "collector_agency": evidence.collector_agency,
+        "collection_timestamp": evidence.collection_timestamp,
+        "description": evidence.description,
+    }
+
+
+def event_to_dict(event: CustodyEvent) -> dict:
+    return {
+        "event_id": event.event_id,
+        "evidence_id": event.evidence_id,
+        "action": event.action,
+        "actor_badge_id": event.actor_badge_id,
+        "from_custodian": event.from_custodian,
+        "to_custodian": event.to_custodian,
+        "reason": event.reason,
+        "file_sha256": event.file_sha256,
+        "timestamp": event.timestamp,
+        "blockchain_tx_id": event.blockchain_tx_id,
+        "blockchain_status": get_blockchain_status(event),
+    }
+
+
+def parse_collection_timestamp(
+    collection_timestamp: str | None,
+) -> datetime | None:
+    if not collection_timestamp:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(
+            collection_timestamp.replace("Z", "+00:00")
+        )
+
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+
+        return parsed
+
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid collection_timestamp. "
+                "Use ISO format such as 2026-09-15T10:30:00Z."
+            ),
+        )
+
+
+@router.post("/upload")
+async def upload_evidence(
+    file: UploadFile = File(...),
+    type: str = Form("Evidence"),
+    badge_id: str | None = Form(None),
+    case_id: str | None = Form(None),
+    collector_name: str | None = Form(None),
+    collector_agency: str | None = Form(None),
+    collection_timestamp: str | None = Form(None),
+    description: str | None = Form(None),
+):
+    db = SessionLocal()
+    file_path = None
+
+    try:
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="A filename is required.",
+            )
+
+        content = await file.read()
+
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded file is empty.",
+            )
+
+        file_sha256 = hashlib.sha256(content).hexdigest()
+
+        evidence_id = generate_evidence_id()
+
+        original_filename = file.filename
+
+        extension = os.path.splitext(original_filename)[1]
+
+        safe_filename = f"{evidence_id}{extension}"
+
+        file_path = os.path.join(
+            UPLOAD_DIR,
+            safe_filename,
+        )
+
+        with open(file_path, "wb") as output_file:
+            output_file.write(content)
+
+        parsed_collection_timestamp = parse_collection_timestamp(
+            collection_timestamp
+        )
+
+        now = datetime.utcnow()
+
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            case_id=case_id,
+            filename=safe_filename,
+            original_filename=original_filename,
+            evidence_type=type,
+            mime_type=file.content_type or "application/octet-stream",
+            file_path=file_path,
+            sha256=file_sha256,
+            size_bytes=len(content),
+            original_badge_id=badge_id,
+            current_custodian=badge_id,
+            status="ACTIVE",
+            registered_at=now,
+            updated_at=now,
+            collector_name=collector_name,
+            collector_agency=collector_agency,
+            collection_timestamp=parsed_collection_timestamp,
+            description=description,
+        )
+
+        db.add(evidence)
+        db.flush()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence.evidence_id,
+            action="REGISTERED",
+            actor_badge_id=badge_id,
+            from_custodian=None,
+            to_custodian=badge_id,
+            reason="Evidence registered",
+            file_sha256=file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        db.commit()
+
+        db.refresh(evidence)
+        db.refresh(event)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence": evidence_to_dict(evidence),
+                "custody_event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence": evidence_to_dict(evidence),
+            "custody_event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    except HTTPException:
+        db.rollback()
+
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Evidence upload failed: {str(error)}",
+        )
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}")
+def get_evidence(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        return {
+            "success": True,
+            "evidence": evidence_to_dict(evidence),
+        }
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}/custody")
+def get_evidence_custody(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        for event in events:
+            if event.blockchain_status in {
+                "PENDING",
+                "NOT_RECORDED",
+            }:
+                synchronize_event_from_fabric(
+                    db,
+                    event,
+                )
+
+        db.expire_all()
+
+        events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence.evidence_id,
+            "case_id": evidence.case_id,
+            "status": evidence.status,
+            "current_custodian": evidence.current_custodian,
+            "sha256": evidence.sha256,
+            "filename": evidence.filename,
+            "original_filename": evidence.original_filename,
+            "evidence_type": evidence.evidence_type,
+            "mime_type": evidence.mime_type,
+            "size_bytes": evidence.size_bytes,
+            "original_badge_id": evidence.original_badge_id,
+            "collector_name": evidence.collector_name,
+            "collector_agency": evidence.collector_agency,
+            "collection_timestamp": evidence.collection_timestamp,
+            "description": evidence.description,
+            "registered_at": evidence.registered_at,
+            "updated_at": evidence.updated_at,
+            "events": [
+                event_to_dict(event)
+                for event in events
+            ],
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/transfer")
+def transfer_evidence(
+    evidence_id: str,
+    to_badge_id: str = Form(...),
+    actor_badge_id: str | None = Form(None),
+    reason: str | None = Form(None),
+):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        if not to_badge_id:
+            raise HTTPException(
+                status_code=400,
+                detail="to_badge_id is required.",
+            )
+
+        from_custodian = evidence.current_custodian
+
+        if from_custodian == to_badge_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Evidence is already assigned to this custodian."
+                ),
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="TRANSFER",
+            actor_badge_id=actor_badge_id,
+            from_custodian=from_custodian,
+            to_custodian=to_badge_id,
+            reason=reason or "Evidence transferred",
+            file_sha256=registered_event.file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        evidence.current_custodian = to_badge_id
+        evidence.updated_at = now
+
+        db.commit()
+
+        db.refresh(event)
+        db.refresh(evidence)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence_id": evidence_id,
+                "current_custodian": evidence.current_custodian,
+                "event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "current_custodian": evidence.current_custodian,
+            "event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/access")
+def access_evidence(
+    evidence_id: str,
+    actor_badge_id: str | None = Form(None),
+    reason: str | None = Form(None),
+):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="ACCESS",
+            actor_badge_id=actor_badge_id,
+            from_custodian=evidence.current_custodian,
+            to_custodian=evidence.current_custodian,
+            reason=reason or "Evidence accessed",
+            file_sha256=registered_event.file_sha256,
+            timestamp=now,
+            blockchain_status="PENDING",
+        )
+
+        db.add(event)
+
+        evidence.updated_at = now
+
+        db.commit()
+
+        db.refresh(event)
+
+        try:
+            fabric_result = record_event_on_fabric(event)
+
+            update_event_from_fabric(
+                event,
+                fabric_result,
+            )
+
+            db.commit()
+            db.refresh(event)
+
+        except FabricServiceError as fabric_error:
+            event.blockchain_status = "FAILED"
+
+            db.commit()
+            db.refresh(event)
+
+            return {
+                "success": True,
+                "evidence_id": evidence_id,
+                "event": event_to_dict(event),
+                "blockchain_status": "FAILED",
+                "blockchain_error": str(fabric_error),
+            }
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "event": event_to_dict(event),
+            "blockchain_status": get_blockchain_status(event),
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/verify")
+def verify_evidence_integrity(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        registered_event = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id == evidence_id,
+                CustodyEvent.action == "REGISTERED",
+            )
+            .order_by(CustodyEvent.timestamp.asc())
+            .first()
+        )
+
+        if not registered_event:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Original evidence registration event "
+                    "not found."
+                ),
+            )
+
+        if not evidence.file_path or not os.path.exists(
+            evidence.file_path
+        ):
+            return {
+                "success": False,
+                "evidence_id": evidence_id,
+                "integrity_status": "FILE_NOT_FOUND",
+                "integrity_verified": False,
+                "registered_sha256": registered_event.file_sha256,
+                "current_sha256": None,
+            }
+
+        with open(evidence.file_path, "rb") as input_file:
+            current_content = input_file.read()
+
+        current_sha256 = hashlib.sha256(
+            current_content
+        ).hexdigest()
+
+        is_match = (
+            current_sha256 == registered_event.file_sha256
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "integrity_status": (
+                "VERIFIED"
+                if is_match
+                else "TAMPERED"
+            ),
+            "integrity_verified": is_match,
+            "registered_sha256": registered_event.file_sha256,
+            "current_sha256": current_sha256,
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/reconcile")
+def reconcile_evidence(evidence_id: str):
+    db = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(Evidence.evidence_id == evidence_id)
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail="Evidence not found.",
+            )
+
+        try:
+            fabric_history = get_fabric_history(
+                evidence_id
+            )
+
+        except FabricServiceError as fabric_error:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Unable to read Fabric custody history: "
+                    f"{fabric_error}"
+                ),
+            )
+
+        if not fabric_history:
+            fabric_history = []
+
+        local_events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        synchronized_count = 0
+
+        for event in local_events:
+            for fabric_event in fabric_history:
+                fabric_event_id = (
+                    fabric_event.get("event_id")
+                    or fabric_event.get("eventId")
+                    or fabric_event.get("id")
+                )
+
+                if fabric_event_id == event.event_id:
+                    update_event_from_fabric(
+                        event,
+                        fabric_event,
+                    )
+
+                    synchronized_count += 1
+                    break
+
+        db.commit()
+
+        db.refresh(evidence)
+
+        refreshed_events = (
+            db.query(CustodyEvent)
+            .filter(CustodyEvent.evidence_id == evidence_id)
+            .order_by(CustodyEvent.timestamp.asc())
+            .all()
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "local_event_count": len(local_events),
+            "fabric_event_count": len(fabric_history),
+            "synchronized_count": synchronized_count,
+            "evidence": evidence_to_dict(evidence),
+            "events": [
+                event_to_dict(event)
+                for event in refreshed_events
+            ],
+        }
+
+    finally:
+        db.close()
