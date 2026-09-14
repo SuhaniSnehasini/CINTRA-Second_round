@@ -1,0 +1,670 @@
+import hashlib
+import os
+import uuid
+from datetime import datetime
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+
+from ..database import SessionLocal
+from ..models import CustodyEvent, Evidence
+
+router = APIRouter(
+    prefix="/evidence",
+    tags=["evidence"],
+)
+
+
+UPLOAD_DIR = os.path.join(
+    os.path.dirname(
+        os.path.dirname(
+            os.path.dirname(__file__)
+        )
+    ),
+    "uploads",
+)
+
+os.makedirs(
+    UPLOAD_DIR,
+    exist_ok=True,
+)
+
+
+def generate_evidence_id() -> str:
+    """
+    Generates a human-readable unique evidence ID.
+    Example: EV-20260913-A1B2C3D4
+    """
+    timestamp = datetime.utcnow().strftime("%Y%m%d")
+    unique_part = uuid.uuid4().hex[:8].upper()
+
+    return f"EV-{timestamp}-{unique_part}"
+
+
+def generate_event_id() -> str:
+    """
+    Generates a unique custody event ID.
+    """
+    return f"CE-{uuid.uuid4().hex.upper()}"
+
+
+@router.post("/upload")
+async def upload_evidence(
+    file: UploadFile = File(...),
+    type: str = Form("Evidence"),
+    badge_id: str | None = Form(None),
+    case_id: str | None = Form(None),
+):
+    """
+    Upload evidence and create the first Chain of Custody event.
+
+    Current flow:
+
+        Upload
+          ↓
+        SHA-256
+          ↓
+        Save file
+          ↓
+        Create Evidence record
+          ↓
+        Create REGISTERED custody event
+
+    Blockchain recording will be added in a later phase.
+    """
+
+    if not file:
+        raise HTTPException(
+            status_code=400,
+            detail="No evidence file uploaded.",
+        )
+
+    db: Session = SessionLocal()
+
+    try:
+        # --------------------------------------------------
+        # 1. Read the uploaded file
+        # --------------------------------------------------
+
+        content = await file.read()
+
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded evidence file is empty.",
+            )
+
+        # --------------------------------------------------
+        # 2. Calculate SHA-256
+        # --------------------------------------------------
+
+        sha256_hash = hashlib.sha256(
+            content
+        ).hexdigest()
+
+        # --------------------------------------------------
+        # 3. Generate unique Evidence ID
+        # --------------------------------------------------
+
+        evidence_id = generate_evidence_id()
+
+        # --------------------------------------------------
+        # 4. Generate safe server-side filename
+        # --------------------------------------------------
+
+        original_filename = (
+            file.filename
+            or "evidence_file"
+        )
+
+        # Remove path information that a malicious client
+        # could potentially send.
+        safe_original_filename = os.path.basename(
+            original_filename
+        )
+
+        unique_filename = (
+            f"{evidence_id}_{safe_original_filename}"
+        )
+
+        file_path = os.path.join(
+            UPLOAD_DIR,
+            unique_filename,
+        )
+
+        # --------------------------------------------------
+        # 5. Save the actual evidence file
+        # --------------------------------------------------
+
+        with open(
+            file_path,
+            "wb",
+        ) as evidence_file:
+            evidence_file.write(content)
+
+        # --------------------------------------------------
+        # 6. Create Evidence database record
+        # --------------------------------------------------
+
+        now = datetime.utcnow()
+
+        evidence = Evidence(
+            evidence_id=evidence_id,
+            case_id=case_id,
+            filename=unique_filename,
+            original_filename=safe_original_filename,
+            evidence_type=type,
+            mime_type=file.content_type,
+            file_path=file_path,
+            sha256=sha256_hash,
+            size_bytes=len(content),
+            original_badge_id=badge_id,
+            current_custodian=badge_id,
+            status="IN_CUSTODY",
+            registered_at=now,
+            updated_at=now,
+        )
+
+        db.add(evidence)
+
+        # --------------------------------------------------
+        # 7. Create initial Chain of Custody event
+        # --------------------------------------------------
+
+        registration_event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="REGISTERED",
+            actor_badge_id=badge_id,
+            from_custodian=None,
+            to_custodian=badge_id,
+            reason="Evidence uploaded and registered in CINTRA.",
+            file_sha256=sha256_hash,
+            timestamp=now,
+            blockchain_tx_id=None,
+            blockchain_status="NOT_RECORDED",
+        )
+
+        db.add(registration_event)
+
+        # --------------------------------------------------
+        # 8. Commit both records together
+        # --------------------------------------------------
+
+        db.commit()
+
+        # --------------------------------------------------
+        # 9. Return information to the mobile application
+        # --------------------------------------------------
+
+        return {
+            "success": True,
+
+            "evidence_id": evidence_id,
+
+            "filename": unique_filename,
+
+            "original_filename": safe_original_filename,
+
+            "type": type,
+
+            "mime_type": file.content_type,
+
+            "badge_id": badge_id,
+
+            "case_id": case_id,
+
+            "sha256": sha256_hash,
+
+            "size_bytes": len(content),
+
+            "file_path": f"/uploads/{unique_filename}",
+
+            "status": "IN_CUSTODY",
+
+            "custody_event": {
+                "action": "REGISTERED",
+                "actor_badge_id": badge_id,
+                "timestamp": now.isoformat(),
+            },
+
+            "blockchain_status": "NOT_RECORDED",
+
+            "message": (
+                f"{type} evidence uploaded and "
+                "registered in Chain of Custody."
+            ),
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as exc:
+        db.rollback()
+
+        # If the database operation fails after the file has
+        # been written, remove the orphaned file.
+        try:
+            if "file_path" in locals() and os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Evidence upload failed: "
+                f"{str(exc)}"
+            ),
+        )
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}")
+def get_evidence(
+    evidence_id: str,
+):
+    """
+    Retrieve metadata for one evidence item.
+    """
+
+    db: Session = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.evidence_id == evidence_id
+            )
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Evidence '{evidence_id}' "
+                    "was not found."
+                ),
+            )
+
+        return {
+            "success": True,
+            "evidence": {
+                "evidence_id": evidence.evidence_id,
+                "case_id": evidence.case_id,
+                "filename": evidence.filename,
+                "original_filename": evidence.original_filename,
+                "evidence_type": evidence.evidence_type,
+                "mime_type": evidence.mime_type,
+                "file_path": f"/uploads/{evidence.filename}",
+                "sha256": evidence.sha256,
+                "size_bytes": evidence.size_bytes,
+                "original_badge_id": evidence.original_badge_id,
+                "current_custodian": evidence.current_custodian,
+                "status": evidence.status,
+                "registered_at": evidence.registered_at.isoformat(),
+                "blockchain_status": (
+                    "NOT_RECORDED"
+                ),
+            },
+        }
+
+    finally:
+        db.close()
+
+
+@router.get("/{evidence_id}/custody")
+def get_custody_history(
+    evidence_id: str,
+):
+    """
+    Return the complete Chain of Custody history
+    for an evidence item.
+    """
+
+    db: Session = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.evidence_id == evidence_id
+            )
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Evidence '{evidence_id}' "
+                    "was not found."
+                ),
+            )
+
+        events = (
+            db.query(CustodyEvent)
+            .filter(
+                CustodyEvent.evidence_id
+                == evidence_id
+            )
+            .order_by(
+                CustodyEvent.timestamp.asc(),
+                CustodyEvent.id.asc(),
+            )
+            .all()
+        )
+
+        return {
+            "success": True,
+
+            "evidence": {
+                "evidence_id": evidence.evidence_id,
+                "case_id": evidence.case_id,
+                "filename": evidence.filename,
+                "original_filename": evidence.original_filename,
+                "evidence_type": evidence.evidence_type,
+                "mime_type": evidence.mime_type,
+                "file_path": f"/uploads/{evidence.filename}",
+                "sha256": evidence.sha256,
+                "size_bytes": evidence.size_bytes,
+                "original_badge_id": evidence.original_badge_id,
+                "current_custodian": evidence.current_custodian,
+                "status": evidence.status,
+                "registered_at": evidence.registered_at.isoformat(),
+                "blockchain_status": "NOT_RECORDED",
+            },
+
+            "events": [
+                {
+                    "event_id": event.event_id,
+                    "evidence_id": event.evidence_id,
+                    "action": event.action,
+                    "actor_badge_id": event.actor_badge_id,
+                    "from_custodian": event.from_custodian,
+                    "to_custodian": event.to_custodian,
+                    "reason": event.reason,
+                    "file_sha256": event.file_sha256,
+                    "timestamp": event.timestamp.isoformat(),
+                    "blockchain_tx_id": event.blockchain_tx_id,
+                    "blockchain_status": event.blockchain_status,
+                }
+                for event in events
+            ],
+        }
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/transfer")
+def transfer_evidence(
+    evidence_id: str,
+    from_badge_id: str = Form(...),
+    to_badge_id: str = Form(...),
+    reason: str = Form("Evidence custody transfer."),
+):
+    """
+    Transfer evidence from one officer to another.
+
+    This currently records the custody event in SQLite.
+    Hyperledger Fabric will be connected in a later phase.
+    """
+
+    if from_badge_id == to_badge_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The source and destination "
+                "officers must be different."
+            ),
+        )
+
+    db: Session = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.evidence_id == evidence_id
+            )
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Evidence '{evidence_id}' "
+                    "was not found."
+                ),
+            )
+
+        if (
+            evidence.current_custodian
+            and evidence.current_custodian
+            != from_badge_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Custody transfer rejected. "
+                    f"Current custodian is "
+                    f"{evidence.current_custodian}."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="TRANSFERRED",
+            actor_badge_id=from_badge_id,
+            from_custodian=from_badge_id,
+            to_custodian=to_badge_id,
+            reason=reason,
+            file_sha256=evidence.sha256,
+            timestamp=now,
+            blockchain_tx_id=None,
+            blockchain_status="NOT_RECORDED",
+        )
+
+        evidence.current_custodian = to_badge_id
+        evidence.updated_at = now
+
+        db.add(event)
+        db.commit()
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "action": "TRANSFERRED",
+            "from_custodian": from_badge_id,
+            "to_custodian": to_badge_id,
+            "timestamp": now.isoformat(),
+            "blockchain_status": "NOT_RECORDED",
+            "message": "Evidence custody transferred successfully.",
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Custody transfer failed: "
+                f"{str(exc)}"
+            ),
+        )
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/access")
+def record_evidence_access(
+    evidence_id: str,
+    badge_id: str = Form(...),
+):
+    """
+    Record that an officer accessed an evidence item.
+
+    This will later be written to the blockchain as well.
+    """
+
+    db: Session = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.evidence_id == evidence_id
+            )
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Evidence '{evidence_id}' "
+                    "was not found."
+                ),
+            )
+
+        now = datetime.utcnow()
+
+        event = CustodyEvent(
+            event_id=generate_event_id(),
+            evidence_id=evidence_id,
+            action="ACCESSED",
+            actor_badge_id=badge_id,
+            from_custodian=None,
+            to_custodian=None,
+            reason="Evidence accessed by authorized officer.",
+            file_sha256=evidence.sha256,
+            timestamp=now,
+            blockchain_tx_id=None,
+            blockchain_status="NOT_RECORDED",
+        )
+
+        db.add(event)
+        db.commit()
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "action": "ACCESSED",
+            "actor_badge_id": badge_id,
+            "timestamp": now.isoformat(),
+            "blockchain_status": "NOT_RECORDED",
+            "message": "Evidence access recorded successfully.",
+        }
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Evidence access logging failed: "
+                f"{str(exc)}"
+            ),
+        )
+
+    finally:
+        db.close()
+
+
+@router.post("/{evidence_id}/verify")
+def verify_evidence_integrity(
+    evidence_id: str,
+):
+    """
+    Recalculate SHA-256 from the stored evidence file
+    and compare it with the originally registered hash.
+    """
+
+    db: Session = SessionLocal()
+
+    try:
+        evidence = (
+            db.query(Evidence)
+            .filter(
+                Evidence.evidence_id == evidence_id
+            )
+            .first()
+        )
+
+        if not evidence:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Evidence '{evidence_id}' "
+                    "was not found."
+                ),
+            )
+
+        if not os.path.exists(evidence.file_path):
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "The original evidence file "
+                    "could not be found on the server."
+                ),
+            )
+
+        hasher = hashlib.sha256()
+
+        with open(
+            evidence.file_path,
+            "rb",
+        ) as stored_file:
+            while True:
+                chunk = stored_file.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                hasher.update(chunk)
+
+        current_hash = hasher.hexdigest()
+
+        verified = (
+            current_hash.lower()
+            == evidence.sha256.lower()
+        )
+
+        return {
+            "success": True,
+            "evidence_id": evidence_id,
+            "stored_sha256": evidence.sha256,
+            "current_sha256": current_hash,
+            "verified": verified,
+            "message": (
+                "Evidence integrity verified. "
+                "The file matches the registered SHA-256 hash."
+                if verified
+                else
+                "WARNING: Evidence integrity verification failed. "
+                "The current file does not match the registered SHA-256 hash."
+            ),
+        }
+
+    finally:
+        db.close()

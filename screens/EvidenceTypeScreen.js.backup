@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-
 import {
   View,
   Text,
@@ -20,6 +19,7 @@ import { uploadEvidence } from '../services/api';
 import { getCurrentUser } from '../services/authService';
 
 export default function EvidenceTypeScreen({ navigation, route }) {
+
   const type = route?.params?.type || 'Evidence';
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -32,16 +32,12 @@ export default function EvidenceTypeScreen({ navigation, route }) {
     switch (type) {
       case 'Image':
         return 'image';
-
       case 'Video':
         return 'videocam';
-
       case 'Audio':
         return 'mic';
-
       case 'Document':
         return 'document-text';
-
       default:
         return 'folder';
     }
@@ -51,13 +47,10 @@ export default function EvidenceTypeScreen({ navigation, route }) {
     switch (type) {
       case 'Image':
         return 'image/*';
-
       case 'Video':
         return 'video/*';
-
       case 'Audio':
         return 'audio/*';
-
       case 'Document':
         return [
           'application/pdf',
@@ -65,7 +58,6 @@ export default function EvidenceTypeScreen({ navigation, route }) {
           'text/plain',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
-
       default:
         return '*/*';
     }
@@ -80,11 +72,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         copyToCacheDirectory: true,
       });
 
-      if (
-        !res.canceled &&
-        res.assets &&
-        res.assets.length > 0
-      ) {
+      if (!res.canceled && res.assets && res.assets.length > 0) {
         const fileAsset = res.assets[0];
 
         setSelectedFile(fileAsset);
@@ -117,7 +105,6 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         'No File Selected',
         `Please select a ${type.toLowerCase()} file from your device first.`
       );
-
       return;
     }
 
@@ -140,30 +127,13 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         badgeId
       );
 
-      console.log(
-        '[CINTRA] Evidence upload successful:',
-        resultData
-      );
-
       setUploadResult(resultData);
 
       Alert.alert(
         'Upload Successful',
-        `${type} evidence saved to backend successfully!`,
-        [
-          {
-            text: 'View Evidence',
-            onPress: () => {
-              navigation.navigate('EvidenceDetails', {
-                evidence: resultData,
-              });
-            },
-          },
-        ],
-        {
-          cancelable: false,
-        }
+        `${type} evidence saved to backend successfully!`
       );
+
     } catch (uploadErr) {
       console.error('Upload failed:', uploadErr);
 
@@ -172,6 +142,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         uploadErr.message ||
           'Unable to upload evidence to server.'
       );
+
     } finally {
       setIsUploading(false);
     }
@@ -179,8 +150,10 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
   return (
     <SafeAreaView style={styles.container}>
+
       {/* Header */}
       <View style={styles.header}>
+
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -197,9 +170,11 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         </Text>
 
         <View style={{ width: 42 }} />
+
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+
         {/* Main Icon */}
         <View style={styles.mainIcon}>
           <Ionicons
@@ -221,6 +196,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
         {/* File Selection Card */}
         <View style={styles.card}>
+
           <View style={styles.fileIcon}>
             <Ionicons
               name={
@@ -235,6 +211,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
           {selectedFile ? (
             <View style={styles.fileInfo}>
+
               <Text
                 style={styles.fileName}
                 numberOfLines={1}
@@ -252,6 +229,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               </Text>
 
               <View style={styles.hashBox}>
+
                 <Text style={styles.hashLabel}>
                   SHA-256 HASH:
                 </Text>
@@ -269,7 +247,9 @@ export default function EvidenceTypeScreen({ navigation, route }) {
                     {fileHash}
                   </Text>
                 )}
+
               </View>
+
             </View>
           ) : (
             <Text style={styles.fileText}>
@@ -294,6 +274,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
                 : `SELECT ${type.toUpperCase()}`}
             </Text>
           </TouchableOpacity>
+
         </View>
 
         {/* Upload Button */}
@@ -329,7 +310,9 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         {/* Upload Success Card */}
         {uploadResult && (
           <View style={styles.successCard}>
+
             <View style={styles.successHeader}>
+
               <Ionicons
                 name="checkmark-circle"
                 size={24}
@@ -339,6 +322,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               <Text style={styles.successTitle}>
                 SAVED ON SERVER
               </Text>
+
             </View>
 
             <Text style={styles.successDetail}>
@@ -347,24 +331,26 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
             <Text style={styles.successDetail}>
               Size:{' '}
-              {uploadResult.size_bytes
-                ? (uploadResult.size_bytes / 1024).toFixed(1)
-                : '0'}{' '}
-              KB
+              {(uploadResult.size_bytes / 1024).toFixed(1)}
+              {' '}KB
             </Text>
 
             <Text style={styles.successDetail}>
               SHA-256:{' '}
               {uploadResult.sha256?.substring(0, 16)}...
             </Text>
+
           </View>
         )}
+
       </ScrollView>
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+
   container: {
     flex: 1,
     backgroundColor: '#F5F7FA',
@@ -552,4 +538,5 @@ const styles = StyleSheet.create({
     color: '#333',
     marginTop: 2,
   },
+
 });

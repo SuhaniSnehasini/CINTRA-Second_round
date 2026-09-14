@@ -219,4 +219,95 @@ export async function checkBackendHealth() {
   }
   return await response.json();
 }
+export async function getEvidenceCustody(evidenceId) {
+  if (!evidenceId) {
+    throw new Error('Evidence ID is required.');
+  }
+
+  const targetUrl =
+    `${BASE_URL}/api/v1/evidence/${encodeURIComponent(evidenceId)}/custody`;
+
+  console.log('[CINTRA API] Fetching evidence custody:', targetUrl);
+
+  let response;
+
+  try {
+    response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: DEFAULT_HEADERS,
+    });
+  } catch (netErr) {
+    console.error('[CINTRA API] Custody fetch error:', netErr);
+    throw new Error(`Cannot connect to evidence server at ${targetUrl}`);
+  }
+
+  if (!response.ok) {
+    let errorMessage =
+      `Failed to fetch custody history. Status ${response.status}.`;
+
+    try {
+      const errorData = await response.json();
+
+      if (errorData.detail) {
+        errorMessage = errorData.detail;
+      }
+    } catch (error) {
+      // Keep the default error message.
+    }
+
+    throw new Error(errorMessage);
+  }
+
+  return await response.json();
+}
+export async function verifyEvidenceIntegrity(evidenceId) {
+  if (!evidenceId) {
+    throw new Error('Evidence ID is required.');
+  }
+
+  const targetUrl =
+    `${BASE_URL}/api/v1/evidence/${encodeURIComponent(evidenceId)}/verify`;
+
+  console.log(
+    '[CINTRA API] Verifying evidence integrity:',
+    targetUrl
+  );
+
+  let response;
+
+  try {
+    response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: DEFAULT_HEADERS,
+    });
+  } catch (netErr) {
+    console.error(
+      '[CINTRA API] Evidence verification error:',
+      netErr
+    );
+
+    throw new Error(
+      `Cannot connect to evidence server at ${targetUrl}`
+    );
+  }
+
+  if (!response.ok) {
+    let errorMessage =
+      `Verification failed with status ${response.status}.`;
+
+    try {
+      const errorData = await response.json();
+
+      if (errorData.detail) {
+        errorMessage = errorData.detail;
+      }
+    } catch (error) {
+      // Keep the default error message.
+    }
+
+    throw new Error(errorMessage);
+  }
+
+  return await response.json();
+}
 
