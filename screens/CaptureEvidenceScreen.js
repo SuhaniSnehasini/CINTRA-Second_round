@@ -121,7 +121,7 @@ export default function CaptureEvidenceScreen({ navigation }) {
               navigation.navigate(
                 'EvidenceDetails',
                 {
-                  evidence: result,
+                  evidence: result.evidence || result,
                 }
               );
             },

@@ -1,4 +1,5 @@
-cat > import hashlib
+import hashlib
+
 import os
 import uuid
 from datetime import datetime, timezone

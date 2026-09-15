@@ -155,7 +155,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
             text: 'View Evidence',
             onPress: () => {
               navigation.navigate('EvidenceDetails', {
-                evidence: resultData,
+                evidence: resultData.evidence || resultData,
               });
             },
           },
