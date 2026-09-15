@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+
 import {
   View,
   Text,
@@ -19,7 +20,6 @@ import { uploadEvidence } from '../services/api';
 import { getCurrentUser } from '../services/authService';
 
 export default function EvidenceTypeScreen({ navigation, route }) {
-
   const type = route?.params?.type || 'Evidence';
 
   const [selectedFile, setSelectedFile] = useState(null);
@@ -32,12 +32,16 @@ export default function EvidenceTypeScreen({ navigation, route }) {
     switch (type) {
       case 'Image':
         return 'image';
+
       case 'Video':
         return 'videocam';
+
       case 'Audio':
         return 'mic';
+
       case 'Document':
         return 'document-text';
+
       default:
         return 'folder';
     }
@@ -47,10 +51,13 @@ export default function EvidenceTypeScreen({ navigation, route }) {
     switch (type) {
       case 'Image':
         return 'image/*';
+
       case 'Video':
         return 'video/*';
+
       case 'Audio':
         return 'audio/*';
+
       case 'Document':
         return [
           'application/pdf',
@@ -58,6 +65,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
           'text/plain',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ];
+
       default:
         return '*/*';
     }
@@ -72,7 +80,11 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         copyToCacheDirectory: true,
       });
 
-      if (!res.canceled && res.assets && res.assets.length > 0) {
+      if (
+        !res.canceled &&
+        res.assets &&
+        res.assets.length > 0
+      ) {
         const fileAsset = res.assets[0];
 
         setSelectedFile(fileAsset);
@@ -105,6 +117,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         'No File Selected',
         `Please select a ${type.toLowerCase()} file from your device first.`
       );
+
       return;
     }
 
@@ -112,7 +125,11 @@ export default function EvidenceTypeScreen({ navigation, route }) {
       setIsUploading(true);
 
       const user = getCurrentUser();
-      const badgeId = user?.badgeId || 'OFF001';
+
+      const badgeId =
+        user?.badgeId ||
+        user?.badge_id ||
+        'OFF001';
 
       console.log(
         'Uploading evidence file:',
@@ -122,18 +139,44 @@ export default function EvidenceTypeScreen({ navigation, route }) {
       const resultData = await uploadEvidence(
         selectedFile.uri,
         selectedFile.name,
-        selectedFile.mimeType || 'application/octet-stream',
+        selectedFile.mimeType ||
+          'application/octet-stream',
         type,
         badgeId
+      );
+
+      console.log(
+        '[CINTRA] Evidence upload successful:',
+        resultData
       );
 
       setUploadResult(resultData);
 
       Alert.alert(
-        'Upload Successful',
-        `${type} evidence saved to backend successfully!`
+        resultData.success === false
+          ? 'Evidence Saved Locally'
+          : 'Upload Successful',
+        resultData.message ||
+          `${type} evidence saved to backend successfully!`,
+        [
+          {
+            text: 'View Evidence',
+            onPress: () => {
+              navigation.navigate(
+                'EvidenceDetails',
+                {
+                  evidence:
+                    resultData.evidence ||
+                    resultData,
+                }
+              );
+            },
+          },
+        ],
+        {
+          cancelable: false,
+        }
       );
-
     } catch (uploadErr) {
       console.error('Upload failed:', uploadErr);
 
@@ -142,10 +185,24 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         uploadErr.message ||
           'Unable to upload evidence to server.'
       );
-
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const handleViewEvidence = () => {
+    if (!uploadResult) {
+      return;
+    }
+
+    navigation.navigate(
+      'EvidenceDetails',
+      {
+        evidence:
+          uploadResult.evidence ||
+          uploadResult,
+      }
+    );
   };
 
   return (
@@ -173,20 +230,27 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+      >
 
         {/* Main Icon */}
         <View style={styles.mainIcon}>
+
           <Ionicons
             name={getIcon()}
             size={45}
             color="#1976D2"
           />
+
         </View>
+
 
         <Text style={styles.title}>
           Upload {type}
         </Text>
+
 
         <Text style={styles.description}>
           Select a {type.toLowerCase()} file directly from
@@ -194,10 +258,12 @@ export default function EvidenceTypeScreen({ navigation, route }) {
           and upload to investigation evidence server.
         </Text>
 
+
         {/* File Selection Card */}
         <View style={styles.card}>
 
           <View style={styles.fileIcon}>
+
             <Ionicons
               name={
                 selectedFile
@@ -207,9 +273,12 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               size={32}
               color="#1976D2"
             />
+
           </View>
 
+
           {selectedFile ? (
+
             <View style={styles.fileInfo}>
 
               <Text
@@ -219,49 +288,69 @@ export default function EvidenceTypeScreen({ navigation, route }) {
                 {selectedFile.name}
               </Text>
 
+
               <Text style={styles.fileDetails}>
+
                 Size:{' '}
+
                 {selectedFile.size
-                  ? (selectedFile.size / 1024).toFixed(1)
+                  ? (
+                      selectedFile.size / 1024
+                    ).toFixed(1)
                   : '0'}{' '}
+
                 KB | Type:{' '}
+
                 {selectedFile.mimeType || type}
+
               </Text>
 
+
+              {/* SHA-256 */}
               <View style={styles.hashBox}>
 
                 <Text style={styles.hashLabel}>
                   SHA-256 HASH:
                 </Text>
 
+
                 {isHashing ? (
+
                   <ActivityIndicator
                     size="small"
                     color="#1976D2"
                   />
+
                 ) : (
+
                   <Text
                     style={styles.hashValue}
                     numberOfLines={1}
                   >
                     {fileHash}
                   </Text>
+
                 )}
 
               </View>
 
             </View>
+
           ) : (
+
             <Text style={styles.fileText}>
               No file selected from device
             </Text>
+
           )}
+
 
           <TouchableOpacity
             style={styles.selectButton}
             onPress={handleSelect}
             disabled={isUploading}
           >
+
             <Ionicons
               name="folder-open"
               size={20}
@@ -273,9 +362,11 @@ export default function EvidenceTypeScreen({ navigation, route }) {
                 ? 'CHANGE FILE'
                 : `SELECT ${type.toUpperCase()}`}
             </Text>
+
           </TouchableOpacity>
 
         </View>
+
 
         {/* Upload Button */}
         <TouchableOpacity
@@ -285,15 +376,31 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               styles.disabledButton,
           ]}
           onPress={handleUpload}
-          disabled={!selectedFile || isUploading}
+          disabled={
+            !selectedFile ||
+            isUploading
+          }
         >
+
           {isUploading ? (
-            <ActivityIndicator
-              color="#FFFFFF"
-              size="small"
-            />
+
+            <View style={styles.loadingRow}>
+
+              <ActivityIndicator
+                color="#FFFFFF"
+                size="small"
+              />
+
+              <Text style={styles.buttonText}>
+                SECURING EVIDENCE...
+              </Text>
+
+            </View>
+
           ) : (
+
             <>
+
               <Ionicons
                 name="cloud-upload"
                 size={22}
@@ -303,12 +410,17 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               <Text style={styles.buttonText}>
                 UPLOAD TO BACKEND
               </Text>
+
             </>
+
           )}
+
         </TouchableOpacity>
+
 
         {/* Upload Success Card */}
         {uploadResult && (
+
           <View style={styles.successCard}>
 
             <View style={styles.successHeader}>
@@ -325,22 +437,42 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
             </View>
 
+
             <Text style={styles.successDetail}>
-              File: {uploadResult.filename}
+              File:{' '}
+              {uploadResult.filename ||
+                uploadResult.evidence?.filename ||
+                selectedFile?.name}
             </Text>
+
 
             <Text style={styles.successDetail}>
               Size:{' '}
-              {(uploadResult.size_bytes / 1024).toFixed(1)}
-              {' '}KB
+              {uploadResult.size_bytes
+                ? (
+                    uploadResult.size_bytes / 1024
+                  ).toFixed(1)
+                : '0'}{' '}
+              KB
             </Text>
+
 
             <Text style={styles.successDetail}>
               SHA-256:{' '}
-              {uploadResult.sha256?.substring(0, 16)}...
+              {(
+                uploadResult.sha256 ||
+                uploadResult.evidence?.sha256 ||
+                fileHash ||
+                ''
+              ).substring(0, 16)}
+              ...
             </Text>
 
-            {/* Encryption Status */}
+
+            {/* ================================================= */}
+            {/* ENCRYPTION STATUS */}
+            {/* ================================================= */}
+
             <View style={styles.encryptionBox}>
 
               <View style={styles.encryptionRow}>
@@ -357,9 +489,12 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
               </View>
 
+
               <Text style={styles.encryptionMethod}>
-                {uploadResult.encryption || 'AES-256-GCM'}
+                {uploadResult.encryption ||
+                  'AES-256-GCM'}
               </Text>
+
 
               <Text style={styles.encryptionStatus}>
                 ENCRYPTED AND STORED SECURELY
@@ -367,7 +502,74 @@ export default function EvidenceTypeScreen({ navigation, route }) {
 
             </View>
 
+
+            {/* ================================================= */}
+            {/* CHAIN OF CUSTODY STATUS */}
+            {/* ================================================= */}
+
+            <View style={styles.custodyBox}>
+
+              <View style={styles.custodyHeader}>
+
+                <Ionicons
+                  name="link"
+                  size={20}
+                  color="#1976D2"
+                />
+
+                <Text style={styles.custodyTitle}>
+                  CHAIN OF CUSTODY
+                </Text>
+
+              </View>
+
+
+              <Text style={styles.custodyStatus}>
+
+                Status:{' '}
+
+                {uploadResult.blockchain_status ||
+                  uploadResult.custody_event?.blockchain_status ||
+                  'RECORDED'}
+
+              </Text>
+
+
+              {uploadResult.transaction_id && (
+
+                <Text
+                  style={styles.transactionText}
+                  numberOfLines={2}
+                >
+                  Transaction:{' '}
+                  {uploadResult.transaction_id}
+                </Text>
+
+              )}
+
+            </View>
+
+
+            {/* View Evidence */}
+            <TouchableOpacity
+              style={styles.viewButton}
+              onPress={handleViewEvidence}
+            >
+
+              <Ionicons
+                name="document-text"
+                size={20}
+                color="#FFFFFF"
+              />
+
+              <Text style={styles.viewButtonText}>
+                VIEW EVIDENCE
+              </Text>
+
+            </TouchableOpacity>
+
           </View>
+
         )}
 
       </ScrollView>
@@ -375,6 +577,7 @@ export default function EvidenceTypeScreen({ navigation, route }) {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
 
@@ -503,7 +706,9 @@ const styles = StyleSheet.create({
   hashValue: {
     fontSize: 11,
     fontFamily:
-      Platform.OS === 'ios' ? 'Courier' : 'monospace',
+      Platform.OS === 'ios'
+        ? 'Courier'
+        : 'monospace',
     color: '#333',
     marginTop: 2,
   },
@@ -529,6 +734,11 @@ const styles = StyleSheet.create({
 
   disabledButton: {
     opacity: 0.5,
+  },
+
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
   buttonText: {
@@ -566,6 +776,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  /* ========================================================= */
+  /* ENCRYPTION */
+  /* ========================================================= */
+
   encryptionBox: {
     marginTop: 12,
     backgroundColor: '#E3F2FD',
@@ -600,6 +814,62 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#2E7D32',
     marginTop: 3,
+  },
+
+  /* ========================================================= */
+  /* CHAIN OF CUSTODY */
+  /* ========================================================= */
+
+  custodyBox: {
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
+  },
+
+  custodyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  custodyTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#1976D2',
+    marginLeft: 7,
+    letterSpacing: 0.5,
+  },
+
+  custodyStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 7,
+  },
+
+  transactionText: {
+    fontSize: 10,
+    color: '#666',
+    marginTop: 5,
+  },
+
+  viewButton: {
+    marginTop: 14,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: '#1976D2',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  viewButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 
 });

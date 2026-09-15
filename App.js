@@ -24,6 +24,10 @@ import DatabaseSearchScreen from './screens/DatabaseSearchScreen';
 import EvidenceUploadScreen from './screens/EvidenceUploadScreen';
 import EvidenceTypeScreen from './screens/EvidenceTypeScreen';
 
+import EvidenceDetailsScreen from './screens/EvidenceDetailsScreen';
+import EvidenceCustodyScreen from './screens/EvidenceCustodyScreen';
+import EvidenceVerifyScreen from './screens/EvidenceVerifyScreen';
+
 import {
   isAuthenticated,
   logout,
@@ -35,10 +39,7 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   const navigationRef = useRef(null);
 
-  // Used to know whether a real session was previously active
   const wasAuthenticated = useRef(false);
-
-  // Prevent duplicate logout/alerts
   const loggingOut = useRef(false);
 
   useEffect(() => {
@@ -52,20 +53,11 @@ export default function App() {
       const currentRoute =
         navigationRef.current?.getCurrentRoute()?.name;
 
-      // User is currently logged in
       if (authenticated) {
         wasAuthenticated.current = true;
         return;
       }
 
-      /*
-       * Only show "Session Expired" if:
-       * 1. A session was previously active
-       * 2. We are not already on Login/OTP
-       *
-       * This prevents the alert from appearing on the login
-       * or OTP screen before authentication is completed.
-       */
       if (
         wasAuthenticated.current &&
         currentRoute !== 'Login' &&
@@ -103,10 +95,8 @@ export default function App() {
       }
     };
 
-    // Check immediately
     checkSession();
 
-    // Check every second
     const interval = setInterval(
       checkSession,
       1000
@@ -117,10 +107,6 @@ export default function App() {
     };
   }, []);
 
-  /*
-   * Any touch anywhere in the application
-   * counts as user activity.
-   */
   const handleActivity = () => {
     if (loggingOut.current) {
       return;
@@ -136,9 +122,6 @@ export default function App() {
       style={{ flex: 1 }}
       onStartShouldSetResponderCapture={() => {
         handleActivity();
-
-        // Return false so the actual button/input
-        // can still receive the touch.
         return false;
       }}
     >
@@ -197,6 +180,21 @@ export default function App() {
           <Stack.Screen
             name="EvidenceType"
             component={EvidenceTypeScreen}
+          />
+
+          <Stack.Screen
+            name="EvidenceDetails"
+            component={EvidenceDetailsScreen}
+          />
+
+          <Stack.Screen
+            name="EvidenceCustody"
+            component={EvidenceCustodyScreen}
+          />
+
+          <Stack.Screen
+            name="EvidenceVerify"
+            component={EvidenceVerifyScreen}
           />
         </Stack.Navigator>
       </NavigationContainer>
