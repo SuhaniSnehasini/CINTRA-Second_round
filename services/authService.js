@@ -1,3 +1,5 @@
+import { clearSelectedCase } from './caseService';
+
 const DEMO_BADGE_ID = 'OFF001';
 
 const SESSION_TIMEOUT = 60 * 1000; // 60 seconds
@@ -60,6 +62,7 @@ export const logout = () => {
   lastActivityTime = null;
   currentOTP = null;
   otpGeneratedTime = null;
+  clearSelectedCase();
 };
 
 export const updateActivity = () => {

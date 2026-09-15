@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 import {
   View,
@@ -22,6 +22,18 @@ export default function LoginScreen({ navigation }) {
   const [badgeId, setBadgeId] = useState('');
   const [showOTPNotification, setShowOTPNotification] = useState(false);
   const [generatedOTP, setGeneratedOTP] = useState('');
+  const [otpRemaining, setOtpRemaining] = useState(60);
+
+  useEffect(() => {
+    let interval;
+    if (showOTPNotification) {
+      setOtpRemaining(60);
+      interval = setInterval(() => {
+        setOtpRemaining((prev) => Math.max(0, prev - 1));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [showOTPNotification]);
 
   const handleLogin = () => {
     const cleanedBadgeId = badgeId.trim();
@@ -103,7 +115,7 @@ export default function LoginScreen({ navigation }) {
 
               <View style={styles.otpContainer}>
                 <Text style={styles.otpLabel}>
-                  OTP
+                  OTP:
                 </Text>
 
                 <Text style={styles.otpText}>
@@ -112,7 +124,7 @@ export default function LoginScreen({ navigation }) {
               </View>
 
               <Text style={styles.notificationExpiry}>
-                Valid for 60 seconds
+                {otpRemaining <= 0 ? 'Expired' : `Valid for ${otpRemaining} seconds`}
               </Text>
 
             </View>
@@ -123,15 +135,15 @@ export default function LoginScreen({ navigation }) {
               onPress={continueToOTP}
               activeOpacity={0.8}
             >
+              <Text style={styles.continueText}>
+                CONTINUE
+              </Text>
+
               <Ionicons
                 name="arrow-forward"
                 size={16}
                 color="#FFFFFF"
               />
-
-              <Text style={styles.continueText}>
-                CONTINUE
-              </Text>
             </TouchableOpacity>
 
           </View>
@@ -158,7 +170,7 @@ export default function LoginScreen({ navigation }) {
         </Text>
 
         <Text style={styles.subtitle}>
-          Officer Login
+          CINTRA Access
         </Text>
 
       </View>
@@ -166,6 +178,18 @@ export default function LoginScreen({ navigation }) {
       {/* ================================= */}
       {/* BADGE ID CARD                      */}
       {/* ================================= */}
+
+      <View style={styles.portalRow}>
+        <View style={[styles.portalChip, styles.portalChipOn]}>
+          <Text style={styles.portalChipText}>Officer Login</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.portalChip}
+          onPress={() => navigation.navigate('AdminLogin')}
+        >
+          <Text style={styles.portalChipText}>Admin Login</Text>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.loginCard}>
 
@@ -293,6 +317,34 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: '#666',
     marginTop: 4,
+  },
+
+  portalRow: {
+    flexDirection: 'row',
+    marginBottom: 14,
+  },
+
+  portalChip: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D5D5D5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    backgroundColor: '#FFFFFF',
+  },
+
+  portalChipOn: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#1976D2',
+  },
+
+  portalChipText: {
+    fontWeight: '700',
+    color: '#1976D2',
+    fontSize: 13,
   },
 
   // =================================

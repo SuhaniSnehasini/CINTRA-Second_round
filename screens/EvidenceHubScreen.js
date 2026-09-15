@@ -8,15 +8,9 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
-
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-
-import {
-  getCurrentUser,
-  logout,
-} from '../services/authService';
 
 import {
   getSelectedCase,
@@ -25,11 +19,12 @@ import {
   subscribeCaseChanges,
 } from '../services/caseService';
 
-export default function HomeScreen({ navigation }) {
-  const user = getCurrentUser();
-  const badgeId = user?.badgeId || 'OFF001';
+export default function EvidenceHubScreen({ navigation, route }) {
+  const [activeCase, setActiveCaseState] = useState(
+    route?.params?.case || getSelectedCase()
+  );
+  const caseId = route?.params?.caseId || activeCase?.case_id;
 
-  const [activeCase, setActiveCaseState] = useState(getSelectedCase());
   const [modalVisible, setModalVisible] = useState(false);
   const [casesList, setCasesList] = useState([]);
   const [loadingCases, setLoadingCases] = useState(false);
@@ -58,8 +53,10 @@ export default function HomeScreen({ navigation }) {
 
   const handleSelectCaseItem = (item) => {
     setSelectedCase(item);
+    setActiveCaseState(item);
     setModalVisible(false);
     setGuardAlertVisible(false);
+
     if (pendingAction) {
       const actionToExecute = pendingAction;
       setPendingAction(null);
@@ -71,42 +68,36 @@ export default function HomeScreen({ navigation }) {
 
   const executeNavAction = (actionKey, currentCase) => {
     const caseObj = currentCase || activeCase;
-    const caseId = caseObj?.case_id;
+    const currentCaseId = caseObj?.case_id;
 
     switch (actionKey) {
-      case 'Evidence':
-        navigation.navigate('EvidenceHub', { caseId, case: caseObj });
+      case 'EvidenceUpload':
+        navigation.navigate('EvidenceUpload', { caseId: currentCaseId, case: caseObj });
         break;
-      case 'CaptureMatch':
-        navigation.navigate('Scanner', { caseId, case: caseObj });
+      case 'CapturePhoto':
+        navigation.navigate('CaptureEvidence', { caseId: currentCaseId, case: caseObj });
         break;
-      case 'DatabaseSearch':
-        navigation.navigate('DatabaseSearch', { caseId, case: caseObj });
+      case 'EvidenceRepo':
+        navigation.navigate('AdminEvidence', { caseId: currentCaseId, case: caseObj });
+        break;
+      case 'ChainOfCustody':
+        navigation.navigate('AdminIntegrity', { caseId: currentCaseId, case: caseObj });
+        break;
+      case 'VerifyIntegrity':
+        navigation.navigate('AdminIntegrity', { caseId: currentCaseId, case: caseObj });
         break;
       default:
         break;
     }
   };
 
-  const handleAction = (actionKey, requiresCase = true) => {
-    if (requiresCase && !activeCase) {
+  const handleAction = (actionKey) => {
+    if (!activeCase) {
       setPendingAction(actionKey);
       setGuardAlertVisible(true);
       return;
     }
     executeNavAction(actionKey, activeCase);
-  };
-
-  const handleLogout = () => {
-    logout();
-    navigation.reset({
-      index: 0,
-      routes: [
-        {
-          name: 'Login',
-        },
-      ],
-    });
   };
 
   const getPriorityColor = (priority) => {
@@ -133,183 +124,118 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
+  const evidenceOptions = [
+    {
+      key: 'EvidenceUpload',
+      title: 'Upload Evidence',
+      description: 'Upload images, video, audio, or document files to active case.',
+      icon: 'cloud-upload',
+    },
+    {
+      key: 'CapturePhoto',
+      title: 'Capture Photo Evidence',
+      description: 'Capture forensic evidence photos with SHA-256 integrity watermark.',
+      icon: 'camera',
+    },
+    {
+      key: 'EvidenceRepo',
+      title: 'Evidence Repository',
+      description: 'View and audit all digital evidence linked to investigation cases.',
+      icon: 'folder-open',
+    },
+    {
+      key: 'ChainOfCustody',
+      title: 'Chain of Custody',
+      description: 'Inspect tamper-proof Fabric chain audit logs for case evidence.',
+      icon: 'link',
+    },
+    {
+      key: 'VerifyIntegrity',
+      title: 'Verify Integrity',
+      description: 'Re-verify SHA-256 cryptographic hashes for tamper verification.',
+      icon: 'shield-checkmark',
+    },
+  ];
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>CINTRA</Text>
-          <Text style={styles.headerSubtitle}>Criminal Network Analysis Dashboard</Text>
-        </View>
-
         <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
           activeOpacity={0.8}
         >
-          <Ionicons name="log-out-outline" size={22} color="#1976D2" />
+          <Ionicons name="arrow-back" size={24} color="#1976D2" />
         </TouchableOpacity>
+
+        <Text style={styles.headerTitle}>EVIDENCE HUB</Text>
+
+        <View style={{ width: 42 }} />
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Officer Profile Card */}
-        <View style={styles.officerCard}>
-          <View style={styles.officerIcon}>
-            <Ionicons name="person" size={27} color="#1976D2" />
-          </View>
-
-          <View style={styles.officerInfo}>
-            <Text style={styles.officerLabel}>AUTHENTICATED OFFICER</Text>
-            <Text style={styles.badgeId}>Badge ID: {badgeId}</Text>
-
-            <View style={styles.statusRow}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Secure Session Active</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Current Case Section */}
-        <View style={styles.sectionHeader}>
-          <Ionicons name="briefcase" size={20} color="#1976D2" />
-          <Text style={styles.sectionTitle}>CURRENT CASE</Text>
-        </View>
-
+        {/* Active Case Banner */}
         {activeCase ? (
-          <View style={styles.activeCaseCard}>
-            <View style={styles.caseCardHeader}>
-              <View style={styles.caseBadgeRow}>
-                <View style={[styles.badge, { backgroundColor: getStatusColor(activeCase.status) }]}>
-                  <Text style={styles.badgeText}>{activeCase.status}</Text>
-                </View>
-
-                {activeCase.priority && (
-                  <View style={[styles.badge, { backgroundColor: getPriorityColor(activeCase.priority), marginLeft: 8 }]}>
-                    <Text style={styles.badgeText}>{activeCase.priority} PRIORITY</Text>
-                  </View>
-                )}
+          <View style={styles.caseBanner}>
+            <View style={styles.caseBannerLeft}>
+              <Ionicons name="briefcase" size={18} color="#1976D2" />
+              <View style={{ marginLeft: 10 }}>
+                <Text style={styles.caseBannerLabel}>ACTIVE CASE</Text>
+                <Text style={styles.caseBannerId}>{activeCase.case_id}</Text>
+                <Text style={styles.caseBannerTitle} numberOfLines={1}>{activeCase.title}</Text>
               </View>
-
-              <TouchableOpacity style={styles.switchCaseBtn} onPress={handleOpenCaseModal}>
-                <Ionicons name="swap-horizontal" size={16} color="#1976D2" />
-                <Text style={styles.switchCaseText}>Switch Case</Text>
-              </TouchableOpacity>
             </View>
 
-            <Text style={styles.caseIdText}>{activeCase.case_id}</Text>
-            <Text style={styles.caseTitleText}>{activeCase.title}</Text>
-
-            <View style={styles.caseDetailRow}>
-              <Ionicons name="calendar-outline" size={14} color="#666" />
-              <Text style={styles.caseMetaText}>Date: {activeCase.date}</Text>
-
-              <Ionicons name="person-outline" size={14} color="#666" style={{ marginLeft: 16 }} />
-              <Text style={styles.caseMetaText}>Assignment: {activeCase.officer || `Badge ${badgeId}`}</Text>
-            </View>
-
-            {activeCase.summary ? (
-              <Text style={styles.caseSummaryText} numberOfLines={2}>
-                {activeCase.summary}
-              </Text>
-            ) : null}
+            <TouchableOpacity
+              style={styles.switchCaseBtn}
+              onPress={handleOpenCaseModal}
+            >
+              <Ionicons name="swap-horizontal" size={14} color="#1976D2" />
+              <Text style={styles.switchCaseText}>Switch</Text>
+            </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.noCaseCard}>
-            <Ionicons name="warning-outline" size={32} color="#D32F2F" />
-            <Text style={styles.noCaseTitle}>No Active Case Selected</Text>
-            <Text style={styles.noCaseSubtitle}>
-              You must select an active case to enable evidence collection, face matching, and integrity operations.
-            </Text>
-
-            <TouchableOpacity style={styles.selectCaseButton} onPress={handleOpenCaseModal}>
-              <Ionicons name="briefcase-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.selectCaseBtnText}>SELECT ACTIVE CASE</Text>
+          <View style={styles.noCaseBanner}>
+            <Ionicons name="warning-outline" size={22} color="#D32F2F" />
+            <Text style={styles.noCaseText}>No active case selected for evidence operations.</Text>
+            <TouchableOpacity
+              style={styles.selectCaseBtn}
+              onPress={handleOpenCaseModal}
+            >
+              <Text style={styles.selectCaseBtnText}>Select Case</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Dashboard Actions Section */}
-        <View style={[styles.sectionHeader, { marginTop: 22 }]}>
-          <Ionicons name="grid-outline" size={20} color="#1976D2" />
-          <Text style={styles.sectionTitle}>OFFICER ACTIONS</Text>
-        </View>
+        <Text style={styles.hubTitle}>Case Evidence Management</Text>
+        <Text style={styles.hubSubtitle}>
+          Select an evidence action below to perform uploads, photo capture, repository lookup, or chain-of-custody verification.
+        </Text>
 
-        {/* 1. Evidence */}
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => handleAction('Evidence', true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.actionIcon}>
-            <Ionicons name="folder-open" size={26} color="#1976D2" />
-          </View>
+        {/* Evidence Hub Options */}
+        {evidenceOptions.map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            style={styles.actionCard}
+            onPress={() => handleAction(item.key)}
+            activeOpacity={0.8}
+          >
+            <View style={styles.actionIcon}>
+              <Ionicons name={item.icon} size={26} color="#1976D2" />
+            </View>
 
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Evidence</Text>
-            <Text style={styles.actionDescription}>
-              Access evidence upload, photo capture, repository, chain of custody, and integrity verification.
-            </Text>
-          </View>
+            <View style={styles.actionContent}>
+              <Text style={styles.actionTitle}>{item.title}</Text>
+              <Text style={styles.actionDescription}>{item.description}</Text>
+            </View>
 
-          <Ionicons name="chevron-forward" size={22} color="#1976D2" />
-        </TouchableOpacity>
-
-        {/* 2. Capture & Match */}
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => handleAction('CaptureMatch', true)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.actionIcon}>
-            <Ionicons name="scan" size={26} color="#1976D2" />
-          </View>
-
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Capture & Match</Text>
-            <Text style={styles.actionDescription}>
-              Biometric face scan and instant database suspect matching.
-            </Text>
-          </View>
-
-          <Ionicons name="chevron-forward" size={22} color="#1976D2" />
-        </TouchableOpacity>
-
-        {/* 3. Database Search */}
-        <TouchableOpacity
-          style={styles.actionCard}
-          onPress={() => handleAction('DatabaseSearch', false)}
-          activeOpacity={0.8}
-        >
-          <View style={styles.actionIcon}>
-            <Ionicons name="search" size={26} color="#1976D2" />
-          </View>
-
-          <View style={styles.actionContent}>
-            <Text style={styles.actionTitle}>Database Search</Text>
-            <Text style={styles.actionDescription}>
-              Query criminal records and suspect profiles directly.
-            </Text>
-          </View>
-
-          <Ionicons name="chevron-forward" size={22} color="#1976D2" />
-        </TouchableOpacity>
-
-        {/* Security Alert Card */}
-        <View style={styles.securityCard}>
-          <View style={styles.securityIcon}>
-            <Ionicons name="shield-checkmark" size={22} color="#1976D2" />
-          </View>
-
-          <View style={styles.securityContent}>
-            <Text style={styles.securityTitle}>SECURE SESSION ACTIVE</Text>
-            <Text style={styles.securityText}>
-              Inactivity timer active (60 seconds). All actions logged to immutable audit ledger.
-            </Text>
-          </View>
-        </View>
+            <Ionicons name="chevron-forward" size={22} color="#1976D2" />
+          </TouchableOpacity>
+        ))}
       </ScrollView>
 
       {/* Case Guard Warning Modal */}
@@ -327,7 +253,7 @@ export default function HomeScreen({ navigation }) {
             </View>
 
             <Text style={styles.alertMessage}>
-              You must select an active case before capturing or uploading evidence to ensure chain of custody.
+              You must select an active case before performing evidence operations to ensure proper chain of custody tracking.
             </Text>
 
             <View style={styles.alertActions}>
@@ -427,7 +353,7 @@ export default function HomeScreen({ navigation }) {
                       <Text style={styles.caseItemTitle}>{item.title}</Text>
 
                       <Text style={styles.caseItemMeta}>
-                        Assigned: {item.officer || `Badge ${badgeId}`} | Date: {item.date}
+                        Assigned: {item.officer || 'Badge OFF001'} | Date: {item.date}
                       </Text>
 
                       {isSelected && (
@@ -444,7 +370,7 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -453,40 +379,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F7FA',
   },
-
   header: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 20,
-    paddingTop: 55,
-    paddingBottom: 18,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-
-    elevation: 3,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 15,
+    paddingBottom: 15,
+    backgroundColor: '#FFFFFF',
+    elevation: 2,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
   },
-
-  headerTitle: {
-    fontSize: 25,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    letterSpacing: 1.5,
-  },
-
-  headerSubtitle: {
-    fontSize: 12,
-    color: '#777',
-    marginTop: 2,
-  },
-
-  logoutButton: {
+  backButton: {
     width: 42,
     height: 42,
     borderRadius: 21,
@@ -494,211 +401,106 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  content: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-
-  officerCard: {
-    backgroundColor: '#E3F2FD',
-    borderRadius: 15,
-    padding: 17,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-
-  officerIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  officerInfo: {
-    marginLeft: 13,
-    flex: 1,
-  },
-
-  officerLabel: {
-    fontSize: 10,
+  headerTitle: {
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#1976D2',
-    letterSpacing: 0.7,
+    letterSpacing: 1,
   },
-
-  badgeId: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#222',
-    marginTop: 3,
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 35,
   },
-
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 5,
-  },
-
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#1976D2',
-    marginRight: 6,
-  },
-
-  statusText: {
-    fontSize: 10,
-    color: '#555',
-  },
-
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#333',
-    marginLeft: 8,
-    letterSpacing: 0.8,
-  },
-
-  activeCaseCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 15,
-    padding: 18,
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 5,
-    borderLeftWidth: 5,
-    borderLeftColor: '#1976D2',
-  },
-
-  caseCardHeader: {
+  caseBanner: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 14,
+    padding: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#1976D2',
   },
-
-  caseBadgeRow: {
+  caseBannerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    marginRight: 10,
   },
-
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-
-  badgeText: {
+  caseBannerLabel: {
     fontSize: 10,
     fontWeight: 'bold',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
+    color: '#1976D2',
+    letterSpacing: 0.6,
   },
-
+  caseBannerId: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  caseBannerTitle: {
+    fontSize: 11,
+    color: '#555',
+    marginTop: 2,
+  },
   switchCaseBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 14,
-    backgroundColor: '#E3F2FD',
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BBDEFB',
   },
-
   switchCaseText: {
     fontSize: 11,
     fontWeight: 'bold',
     color: '#1976D2',
     marginLeft: 4,
   },
-
-  caseIdText: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    letterSpacing: 0.5,
-    marginTop: 2,
-  },
-
-  caseTitleText: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#222',
-    marginTop: 3,
-  },
-
-  caseDetailRow: {
+  noCaseBanner: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: 14,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
-  },
-
-  caseMetaText: {
-    fontSize: 11,
-    color: '#666',
-    marginLeft: 4,
-  },
-
-  caseSummaryText: {
-    fontSize: 12,
-    color: '#777',
-    marginTop: 8,
-    lineHeight: 17,
-  },
-
-  noCaseCard: {
-    backgroundColor: '#FFF8E1',
-    borderRadius: 15,
-    padding: 20,
-    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
     borderWidth: 1,
     borderColor: '#FFE082',
   },
-
-  noCaseTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#D32F2F',
-    marginTop: 8,
-  },
-
-  noCaseSubtitle: {
+  noCaseText: {
     fontSize: 12,
     color: '#5D4037',
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 14,
-    lineHeight: 17,
+    flex: 1,
+    marginLeft: 8,
+    marginRight: 8,
   },
-
-  selectCaseButton: {
+  selectCaseBtn: {
     backgroundColor: '#1976D2',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
   },
-
   selectCaseBtnText: {
     color: '#FFFFFF',
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: 'bold',
-    marginLeft: 8,
-    letterSpacing: 0.5,
   },
-
+  hubTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#222',
+    marginBottom: 4,
+  },
+  hubSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
+    marginBottom: 20,
+  },
   actionCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
@@ -706,17 +508,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
-
     elevation: 2,
     shadowColor: '#000',
     shadowOpacity: 0.06,
     shadowRadius: 4,
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
   },
-
   actionIcon: {
     width: 50,
     height: 50,
@@ -725,63 +522,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
   actionContent: {
     flex: 1,
     marginLeft: 13,
     marginRight: 8,
   },
-
   actionTitle: {
     fontSize: 15,
     fontWeight: 'bold',
     color: '#222',
   },
-
   actionDescription: {
     fontSize: 11,
     color: '#777',
     marginTop: 3,
     lineHeight: 16,
   },
-
-  securityCard: {
-    marginTop: 12,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 13,
-    padding: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-
-  securityIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  securityContent: {
-    flex: 1,
-    marginLeft: 11,
-  },
-
-  securityTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#1976D2',
-    letterSpacing: 0.5,
-  },
-
-  securityText: {
-    fontSize: 10,
-    color: '#666',
-    marginTop: 3,
-    lineHeight: 15,
-  },
-
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -789,7 +545,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-
   modalContainer: {
     width: '100%',
     maxHeight: '80%',
@@ -798,7 +553,6 @@ const styles = StyleSheet.create({
     padding: 20,
     elevation: 10,
   },
-
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -807,12 +561,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#EEEEEE',
   },
-
   modalHeaderTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-
   modalTitle: {
     fontSize: 17,
     fontWeight: 'bold',
@@ -820,26 +572,21 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     letterSpacing: 0.8,
   },
-
   closeBtn: {
     padding: 4,
   },
-
   loadingBox: {
     padding: 40,
     alignItems: 'center',
   },
-
   loadingText: {
     fontSize: 13,
     color: '#666',
     marginTop: 10,
   },
-
   listContainer: {
     paddingVertical: 12,
   },
-
   caseSelectItem: {
     backgroundColor: '#F8F9FA',
     borderRadius: 12,
@@ -848,56 +595,57 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
   },
-
   caseSelectItemActive: {
     borderColor: '#1976D2',
     backgroundColor: '#E3F2FD',
   },
-
   caseItemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-
     marginBottom: 6,
   },
-
   caseItemCode: {
     fontSize: 13,
     fontWeight: 'bold',
     color: '#1976D2',
   },
-
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
   caseItemTitle: {
     fontSize: 15,
     fontWeight: 'bold',
     color: '#222',
     marginBottom: 4,
   },
-
   caseItemMeta: {
     fontSize: 11,
     color: '#666',
   },
-
   selectedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 8,
   },
-
   selectedText: {
     fontSize: 11,
     fontWeight: 'bold',
     color: '#1976D2',
     marginLeft: 4,
   },
-
   alertDialog: {
     width: '100%',
     backgroundColor: '#FFFFFF',
@@ -905,19 +653,16 @@ const styles = StyleSheet.create({
     padding: 22,
     elevation: 8,
   },
-
   alertHeader: {
     alignItems: 'center',
     marginBottom: 10,
   },
-
   alertTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#D32F2F',
     marginTop: 8,
   },
-
   alertMessage: {
     fontSize: 13,
     color: '#555',
@@ -925,13 +670,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 20,
   },
-
   alertActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 10,
   },
-
   alertCancelBtn: {
     flex: 1,
     height: 46,
@@ -940,13 +683,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
   alertCancelText: {
     fontSize: 13,
     fontWeight: 'bold',
     color: '#666',
   },
-
   alertConfirmBtn: {
     flex: 1.4,
     height: 46,
@@ -955,7 +696,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
   alertConfirmText: {
     fontSize: 13,
     fontWeight: 'bold',

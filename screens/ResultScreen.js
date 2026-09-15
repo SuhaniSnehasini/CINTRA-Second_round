@@ -21,12 +21,16 @@ import {
   updateActivity,
 } from '../services/authService';
 
+import { getSelectedCase } from '../services/caseService';
+
 import ForensicWatermark from '../components/ForensicWatermark';
 
 export default function ResultScreen({ navigation, route }) {
   const [verifying, setVerifying] = useState(false);
 
   const evidence = route?.params?.evidence;
+  const activeCase = route?.params?.case || getSelectedCase();
+  const caseId = route?.params?.caseId || evidence?.caseId || activeCase?.case_id;
 
   /*
     Person 2 backend response.
@@ -466,6 +470,18 @@ export default function ResultScreen({ navigation, route }) {
               EVIDENCE INTEGRITY
             </Text>
           </View>
+
+          {caseId && (
+            <>
+              <Text style={styles.label}>
+                Active Case ID
+              </Text>
+
+              <Text style={[styles.valueLeft, { color: '#1976D2', fontWeight: 'bold' }]}>
+                {caseId}
+              </Text>
+            </>
+          )}
 
           <Text style={styles.label}>
             Officer Badge ID

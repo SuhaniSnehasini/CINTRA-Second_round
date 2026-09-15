@@ -9,7 +9,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-export default function EvidenceUploadScreen({ navigation }) {
+import { getSelectedCase } from '../services/caseService';
+
+export default function EvidenceUploadScreen({ navigation, route }) {
+  const activeCase = route?.params?.case || getSelectedCase();
+  const caseId = route?.params?.caseId || activeCase?.case_id;
 
   const evidenceTypes = [
     {
@@ -55,6 +59,16 @@ export default function EvidenceUploadScreen({ navigation }) {
 
       </View>
 
+      {/* Active Case Banner */}
+      {caseId ? (
+        <View style={styles.caseBanner}>
+          <Ionicons name="briefcase" size={18} color="#1976D2" />
+          <Text style={styles.caseBannerText}>
+            ACTIVE CASE: <Text style={styles.caseBannerBold}>{caseId}</Text>
+          </Text>
+        </View>
+      ) : null}
+
       <Text style={styles.title}>
         Select Evidence Type
       </Text>
@@ -73,7 +87,7 @@ export default function EvidenceUploadScreen({ navigation }) {
           onPress={() =>
             navigation.navigate(
               'EvidenceType',
-              { type: item.type }
+              { type: item.type, caseId, case: activeCase }
             )
           }
         >
@@ -193,6 +207,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#777',
     marginTop: 5,
+  },
+
+  caseBanner: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+
+  caseBannerText: {
+    fontSize: 12,
+    color: '#1976D2',
+    marginLeft: 8,
+  },
+
+  caseBannerBold: {
+    fontWeight: 'bold',
   },
 
 });

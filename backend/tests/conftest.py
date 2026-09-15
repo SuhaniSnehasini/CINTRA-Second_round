@@ -1,5 +1,9 @@
 import os
 os.environ["DATABASE_URL"] = "sqlite:///./test_cintra.db"
+os.environ["CINTRA_AUTO_SEED_ADMIN"] = "false"
+os.environ["OTP_DEV_RETURN"] = "true"
+os.environ["OTP_PROVIDER"] = "console"
+os.environ["CINTRA_DEMO_MODE"] = "true"
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app

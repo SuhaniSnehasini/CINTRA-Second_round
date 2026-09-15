@@ -5,6 +5,11 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(BASE_DIR / ".env")
 
+
+def _bool(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 MATCHING_MODE = os.getenv("MATCHING_MODE", "demo").lower()
 # Cosine similarity threshold for the local OpenCV SFace prototype.
 DEMO_MATCH_THRESHOLD = float(os.getenv("DEMO_MATCH_THRESHOLD", "0.40"))
@@ -14,3 +19,20 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'cintra.db'}")
 MODEL_DIR = BASE_DIR / "data" / "models"
 YUNET_MODEL_PATH = MODEL_DIR / "face_detection_yunet_2023mar.onnx"
 SFACE_MODEL_PATH = MODEL_DIR / "face_recognition_sface_2021dec.onnx"
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
+
+CINTRA_DEMO_MODE = _bool("CINTRA_DEMO_MODE", "true")
+CINTRA_AUTO_SEED_ADMIN = _bool("CINTRA_AUTO_SEED_ADMIN", "true")
+
+OTP_PROVIDER = os.getenv("OTP_PROVIDER", "console").strip().lower()
+OTP_EXPIRY_SECONDS = int(os.getenv("OTP_EXPIRY_SECONDS", "60"))
+OTP_MAX_ATTEMPTS = int(os.getenv("OTP_MAX_ATTEMPTS", "3"))
+OTP_DEV_RETURN = _bool("OTP_DEV_RETURN", "true")
+OTP_PEPPER = os.getenv("OTP_PEPPER", "cintra-dev-otp-pepper-change-me")
+ADMIN_SESSION_TIMEOUT_SECONDS = int(os.getenv("ADMIN_SESSION_TIMEOUT_SECONDS", "60"))
+ADMIN_SESSION_PEPPER = os.getenv("ADMIN_SESSION_PEPPER", "cintra-dev-session-pepper-change-me")
+
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+TWILIO_VERIFY_SERVICE_SID = os.getenv("TWILIO_VERIFY_SERVICE_SID", "")

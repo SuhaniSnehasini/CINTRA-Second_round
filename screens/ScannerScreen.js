@@ -27,13 +27,16 @@ import {
 
 import { calculateSHA256 } from '../services/hashService';
 import { identifyFace, incrementGlobalScanCount, getGlobalScanCount } from '../services/api';
+import { getSelectedCase } from '../services/caseService';
 
 import ForensicWatermark from '../components/ForensicWatermark';
 import BiometricScanHUD from '../components/BiometricScanHUD';
 
 import { Ionicons } from '@expo/vector-icons';
 
-export default function ScannerScreen({ navigation }) {
+export default function ScannerScreen({ navigation, route }) {
+  const activeCase = route?.params?.case || getSelectedCase();
+  const caseId = route?.params?.caseId || activeCase?.case_id;
 
   const [permission, requestPermission] =
     useCameraPermissions();
@@ -118,6 +121,7 @@ export default function ScannerScreen({ navigation }) {
         uri: photoUri,
         sha256: sha256,
         badgeId: currentUser?.badgeId || 'OFF001',
+        caseId: caseId,
         capturedAt: new Date().toISOString(),
       };
 
@@ -195,6 +199,8 @@ export default function ScannerScreen({ navigation }) {
         response: res || scanResult,
         capturedImage: capturedImage || 'demo_face.jpg',
         evidence: capturedEvidence,
+        caseId: caseId,
+        case: activeCase,
       });
     }, 1400);
   };

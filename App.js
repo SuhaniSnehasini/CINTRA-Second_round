@@ -23,12 +23,31 @@ import FaceMatchResultScreen from './screens/FaceMatchResultScreen';
 import DatabaseSearchScreen from './screens/DatabaseSearchScreen';
 import EvidenceUploadScreen from './screens/EvidenceUploadScreen';
 import EvidenceTypeScreen from './screens/EvidenceTypeScreen';
+import EvidenceHubScreen from './screens/EvidenceHubScreen';
+import AdminLoginScreen from './screens/admin/AdminLoginScreen';
+import AdminOtpScreen from './screens/admin/AdminOtpScreen';
+import AdminDashboardScreen from './screens/admin/AdminDashboardScreen';
+import AdminResourceScreen from './screens/admin/AdminResourceScreen';
+import AdminDetailScreen from './screens/admin/AdminDetailScreen';
+import AdminAnalyticsScreen from './screens/admin/AdminAnalyticsScreen';
+import {
+  AdminAdminsScreen,
+  AdminIntegrityScreen,
+  AdminSettingsScreen,
+  AdminSystemScreen,
+} from './screens/admin/AdminToolsScreens';
 
 import {
   isAuthenticated,
   logout,
   updateActivity,
 } from './services/authService';
+
+import {
+  isAdminAuthenticated,
+  clearAdminSession,
+  updateAdminActivity,
+} from './services/adminAuth';
 
 const Stack = createNativeStackNavigator();
 
@@ -37,6 +56,7 @@ export default function App() {
 
   // Used to know whether a real session was previously active
   const wasAuthenticated = useRef(false);
+  const wasAdminAuthenticated = useRef(false);
 
   // Prevent duplicate logout/alerts
   const loggingOut = useRef(false);
@@ -47,29 +67,29 @@ export default function App() {
         return;
       }
 
-      const authenticated = isAuthenticated();
+      const officerAuth = isAuthenticated();
+      const adminAuth = isAdminAuthenticated();
+      const currentRoute = navigationRef.current?.getCurrentRoute()?.name;
 
-      const currentRoute =
-        navigationRef.current?.getCurrentRoute()?.name;
-
-      // User is currently logged in
-      if (authenticated) {
+      // Track officer authentication
+      if (officerAuth) {
         wasAuthenticated.current = true;
-        return;
+      }
+
+      // Track admin authentication
+      if (adminAuth) {
+        wasAdminAuthenticated.current = true;
       }
 
       /*
-       * Only show "Session Expired" if:
-       * 1. A session was previously active
-       * 2. We are not already on Login/OTP
-       *
-       * This prevents the alert from appearing on the login
-       * or OTP screen before authentication is completed.
+       * Officer session expiration handling
        */
       if (
+        !officerAuth &&
         wasAuthenticated.current &&
         currentRoute !== 'Login' &&
-        currentRoute !== 'OTP'
+        currentRoute !== 'OTP' &&
+        !String(currentRoute || '').startsWith('Admin')
       ) {
         wasAuthenticated.current = false;
         loggingOut.current = true;
@@ -100,6 +120,47 @@ export default function App() {
             cancelable: false,
           }
         );
+        return;
+      }
+
+      /*
+       * Admin session expiration handling (60-second inactivity security)
+       */
+      if (
+        !adminAuth &&
+        wasAdminAuthenticated.current &&
+        currentRoute !== 'AdminLogin' &&
+        currentRoute !== 'AdminOTP'
+      ) {
+        wasAdminAuthenticated.current = false;
+        loggingOut.current = true;
+
+        clearAdminSession();
+
+        Alert.alert(
+          'Session Expired',
+          'Your session expired due to inactivity. Please log in again.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                navigationRef.current?.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: 'AdminLogin',
+                    },
+                  ],
+                });
+
+                loggingOut.current = false;
+              },
+            },
+          ],
+          {
+            cancelable: false,
+          }
+        );
       }
     };
 
@@ -107,10 +168,7 @@ export default function App() {
     checkSession();
 
     // Check every second
-    const interval = setInterval(
-      checkSession,
-      1000
-    );
+    const interval = setInterval(checkSession, 1000);
 
     return () => {
       clearInterval(interval);
@@ -118,7 +176,7 @@ export default function App() {
   }, []);
 
   /*
-   * Any touch anywhere in the application
+   * Any touch/interaction anywhere in the application
    * counts as user activity.
    */
   const handleActivity = () => {
@@ -128,6 +186,10 @@ export default function App() {
 
     if (isAuthenticated()) {
       updateActivity();
+    }
+
+    if (isAdminAuthenticated()) {
+      updateAdminActivity();
     }
   };
 
@@ -198,6 +260,31 @@ export default function App() {
             name="EvidenceType"
             component={EvidenceTypeScreen}
           />
+
+          <Stack.Screen
+            name="EvidenceHub"
+            component={EvidenceHubScreen}
+          />
+
+          <Stack.Screen name="AdminLogin" component={AdminLoginScreen} />
+          <Stack.Screen name="AdminOTP" component={AdminOtpScreen} />
+          <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+          <Stack.Screen name="AdminOfficers" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminPersons" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminRecognition" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminEvidence" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminInvestigations" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminAudit" component={AdminResourceScreen} />
+          <Stack.Screen name="AdminOfficerDetail" component={AdminDetailScreen} />
+          <Stack.Screen name="AdminPersonDetail" component={AdminDetailScreen} />
+          <Stack.Screen name="AdminRecognitionDetail" component={AdminDetailScreen} />
+          <Stack.Screen name="AdminEvidenceDetail" component={AdminDetailScreen} />
+          <Stack.Screen name="AdminInvestigationDetail" component={AdminDetailScreen} />
+          <Stack.Screen name="AdminIntegrity" component={AdminIntegrityScreen} />
+          <Stack.Screen name="AdminAnalytics" component={AdminAnalyticsScreen} />
+          <Stack.Screen name="AdminSystem" component={AdminSystemScreen} />
+          <Stack.Screen name="AdminSettings" component={AdminSettingsScreen} />
+          <Stack.Screen name="AdminAdmins" component={AdminAdminsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </View>

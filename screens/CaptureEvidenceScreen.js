@@ -17,9 +17,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { calculateSHA256 } from '../services/hashService';
 import { uploadEvidence, identifyFace } from '../services/api';
 import { getCurrentUser } from '../services/authService';
+import { getSelectedCase } from '../services/caseService';
 import ForensicWatermark from '../components/ForensicWatermark';
 
-export default function CaptureEvidenceScreen({ navigation }) {
+export default function CaptureEvidenceScreen({ navigation, route }) {
+  const activeCase = route?.params?.case || getSelectedCase();
+  const caseId = route?.params?.caseId || activeCase?.case_id;
+
   const [capturedImage, setCapturedImage] = useState(null);
   const [imageName, setImageName] = useState('evidence_photo.jpg');
   const [imageHash, setImageHash] = useState('');
@@ -78,7 +82,8 @@ export default function CaptureEvidenceScreen({ navigation }) {
         imageName,
         'image/jpeg',
         'Photo Evidence',
-        badgeId
+        badgeId,
+        caseId
       );
 
       setUploadResult(result);
@@ -148,6 +153,16 @@ export default function CaptureEvidenceScreen({ navigation }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* Active Case Banner */}
+        {caseId ? (
+          <View style={styles.caseBanner}>
+            <Ionicons name="briefcase" size={18} color="#1976D2" />
+            <Text style={styles.caseBannerText}>
+              ACTIVE CASE: <Text style={styles.caseBannerBold}>{caseId}</Text>
+            </Text>
+          </View>
+        ) : null}
 
         {/* Description */}
         <Text style={styles.instruction}>
@@ -277,6 +292,11 @@ export default function CaptureEvidenceScreen({ navigation }) {
             <Text style={styles.successDetail}>
               Evidence Type: {uploadResult.type}
             </Text>
+            {uploadResult.case_id && (
+              <Text style={styles.successDetail}>
+                Case ID: {uploadResult.case_id}
+              </Text>
+            )}
             <Text style={styles.successDetail}>
               Officer Badge ID: {uploadResult.badge_id}
             </Text>
@@ -295,6 +315,25 @@ export default function CaptureEvidenceScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  caseBanner: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  caseBannerText: {
+    fontSize: 12,
+    color: '#1976D2',
+    marginLeft: 8,
+  },
+
+  caseBannerBold: {
+    fontWeight: 'bold',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F5F7FA',

@@ -1,9 +1,13 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { getCurrentUser } from './authService';
 
 const PORT = 8000;
 
 const getBaseUrl = () => {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location?.hostname) {
+    return `http://${window.location.hostname}:${PORT}`;
+  }
   const hostUri =
     Constants.expoConfig?.hostUri ||
     Constants.manifest?.debuggerHost ||
@@ -58,6 +62,10 @@ export async function identifyFace(imageUri) {
     name: 'scan.jpg',
     type: 'image/jpeg',
   });
+  const officer = getCurrentUser();
+  if (officer?.badgeId) {
+    formData.append('badge_id', officer.badgeId);
+  }
 
   try {
     const controller = new AbortController();
@@ -161,7 +169,7 @@ export async function searchSuspect(suspectCode) {
  * Uploads evidence (image, video, audio, document) to backend
  * POST /api/v1/evidence/upload
  */
-export async function uploadEvidence(fileUri, fileName, mimeType, evidenceType = 'Evidence', badgeId = null) {
+export async function uploadEvidence(fileUri, fileName, mimeType, evidenceType = 'Evidence', badgeId = null, caseId = null) {
   if (!fileUri) {
     throw new Error('No file selected for upload.');
   }
@@ -179,6 +187,9 @@ export async function uploadEvidence(fileUri, fileName, mimeType, evidenceType =
   formData.append('type', evidenceType);
   if (badgeId) {
     formData.append('badge_id', badgeId);
+  }
+  if (caseId) {
+    formData.append('case_id', caseId);
   }
 
   let response;
@@ -204,7 +215,11 @@ export async function uploadEvidence(fileUri, fileName, mimeType, evidenceType =
     throw new Error(errorMessage);
   }
 
-  return await response.json();
+  const data = await response.json();
+  if (caseId) {
+    data.case_id = caseId;
+  }
+  return data;
 }
 
 /**

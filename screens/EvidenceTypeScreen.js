@@ -17,10 +17,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import { calculateSHA256 } from '../services/hashService';
 import { uploadEvidence } from '../services/api';
 import { getCurrentUser } from '../services/authService';
+import { getSelectedCase } from '../services/caseService';
 
 export default function EvidenceTypeScreen({ navigation, route }) {
 
   const type = route?.params?.type || 'Evidence';
+  const activeCase = route?.params?.case || getSelectedCase();
+  const caseId = route?.params?.caseId || activeCase?.case_id;
 
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileHash, setFileHash] = useState('');
@@ -124,7 +127,8 @@ export default function EvidenceTypeScreen({ navigation, route }) {
         selectedFile.name,
         selectedFile.mimeType || 'application/octet-stream',
         type,
-        badgeId
+        badgeId,
+        caseId
       );
 
       setUploadResult(resultData);
@@ -174,6 +178,16 @@ export default function EvidenceTypeScreen({ navigation, route }) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
+
+        {/* Active Case Banner */}
+        {caseId ? (
+          <View style={styles.caseBanner}>
+            <Ionicons name="briefcase" size={18} color="#1976D2" />
+            <Text style={styles.caseBannerText}>
+              ACTIVE CASE: <Text style={styles.caseBannerBold}>{caseId}</Text>
+            </Text>
+          </View>
+        ) : null}
 
         {/* Main Icon */}
         <View style={styles.mainIcon}>
@@ -328,6 +342,12 @@ export default function EvidenceTypeScreen({ navigation, route }) {
             <Text style={styles.successDetail}>
               Path: {uploadResult.file_path}
             </Text>
+
+            {uploadResult.case_id && (
+              <Text style={styles.successDetail}>
+                Case ID: {uploadResult.case_id}
+              </Text>
+            )}
 
             <Text style={styles.successDetail}>
               Size:{' '}
@@ -537,6 +557,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#333',
     marginTop: 2,
+  },
+
+  caseBanner: {
+    backgroundColor: '#E3F2FD',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+
+  caseBannerText: {
+    fontSize: 12,
+    color: '#1976D2',
+    marginLeft: 8,
+  },
+
+  caseBannerBold: {
+    fontWeight: 'bold',
   },
 
 });
