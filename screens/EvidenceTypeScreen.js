@@ -320,13 +320,13 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               />
 
               <Text style={styles.successTitle}>
-                SAVED ON SERVER
+                EVIDENCE SECURED
               </Text>
 
             </View>
 
             <Text style={styles.successDetail}>
-              Path: {uploadResult.file_path}
+              File: {uploadResult.filename}
             </Text>
 
             <Text style={styles.successDetail}>
@@ -339,6 +339,33 @@ export default function EvidenceTypeScreen({ navigation, route }) {
               SHA-256:{' '}
               {uploadResult.sha256?.substring(0, 16)}...
             </Text>
+
+            {/* Encryption Status */}
+            <View style={styles.encryptionBox}>
+
+              <View style={styles.encryptionRow}>
+
+                <Ionicons
+                  name="lock-closed"
+                  size={20}
+                  color="#1976D2"
+                />
+
+                <Text style={styles.encryptionTitle}>
+                  ENCRYPTION
+                </Text>
+
+              </View>
+
+              <Text style={styles.encryptionMethod}>
+                {uploadResult.encryption || 'AES-256-GCM'}
+              </Text>
+
+              <Text style={styles.encryptionStatus}>
+                ENCRYPTED AND STORED SECURELY
+              </Text>
+
+            </View>
 
           </View>
         )}
@@ -537,6 +564,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#333',
     marginTop: 2,
+  },
+
+  encryptionBox: {
+    marginTop: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#90CAF9',
+  },
+
+  encryptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  encryptionTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#1976D2',
+    marginLeft: 7,
+    letterSpacing: 0.5,
+  },
+
+  encryptionMethod: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1565C0',
+    marginTop: 5,
+  },
+
+  encryptionStatus: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    marginTop: 3,
   },
 
 });

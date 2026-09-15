@@ -16,7 +16,7 @@ const getBaseUrl = () => {
     }
   }
 
-  return `http://10.63.0.98:${PORT}`;
+  return `http://10.63.6.231:${PORT}`;
 };
 
 export const BASE_URL = getBaseUrl();
