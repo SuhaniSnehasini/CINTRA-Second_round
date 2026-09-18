@@ -17,3 +17,7 @@ __pycache__/
 
 dist/
 build/
+
+__MACOSX/
+.DS_Store
+._*
