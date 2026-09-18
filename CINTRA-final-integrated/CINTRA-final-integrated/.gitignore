@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+backend/.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.env.*
+test_cintra.db

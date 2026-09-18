@@ -1,0 +1,5 @@
+[
+  {"suspect_id":"S001","name":"Raj Kumar","role":"Theft Suspect","wanted":true},
+  {"suspect_id":"S002","name":"Arjun Mehta","role":"Fraud Suspect","wanted":false},
+  {"suspect_id":"S003","name":"Vikram Singh","role":"Robbery Suspect","wanted":true}
+]
